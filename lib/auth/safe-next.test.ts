@@ -7,4 +7,9 @@ test("only allows same-site relative paths", () => {
   expect(safeNext("https://evil.com")).toBe("/");
   expect(safeNext(null)).toBe("/");
   expect(safeNext("/\\evil.com")).toBe("/");
+  expect(safeNext("/\t/evil.com")).toBe("/");
+  expect(safeNext("/\n/evil.com")).toBe("/");
+  expect(safeNext("/\r/evil.com")).toBe("/");
+  expect(safeNext("/%09/evil.com")).toBe("/%09/evil.com");
+  expect(safeNext("/prs?q=a#x")).toBe("/prs?q=a#x");
 });
