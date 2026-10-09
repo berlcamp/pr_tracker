@@ -44,3 +44,7 @@ export async function followPr(prId: string) {
 export async function unfollowPr(prId: string) {
   return rpcAction("unfollow_pr", { p_pr_id: prId }, paths(prId));
 }
+
+export async function supersedeAttachment(attachmentId: string, prId: string, reason: string) {
+  return rpcAction("supersede_attachment", { p_attachment_id: attachmentId, p_reason: reason }, paths(prId));
+}

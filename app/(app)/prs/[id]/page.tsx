@@ -9,6 +9,7 @@ import { PrHeader } from "@/components/pr/pr-header";
 import { PrDocumentCard, type PrDocument } from "@/components/pr/pr-document-card";
 import { PrTimeline } from "@/components/pr/pr-timeline";
 import { RemarksPanel } from "@/components/pr/remarks-panel";
+import { AttachmentsPanel } from "@/components/pr/attachments-panel";
 import { PrivateNotesPanel } from "@/components/pr/private-notes-panel";
 import { PrActionBar, type Suggestion } from "@/components/pr/pr-action-bar";
 import { formatPeso } from "@/lib/format";
@@ -22,7 +23,7 @@ export default async function PrDetailPage({ params }: { params: Promise<{ id: s
 
   const officeId = profile.office?.id;
   const empty = Promise.resolve({ data: [] as never[] });
-  const [prDoc, maxMbRes, timeline, remarks, notes] = await Promise.all([
+  const [prDoc, maxMbRes, timeline, remarks, notes, attachments] = await Promise.all([
     supabase.from("pr_attachments").select("id, filename, created_at, uploader:profiles(full_name)")
       .eq("pr_id", id).eq("is_pr_document", true).is("superseded_at", null).maybeSingle(),
     supabase.from("app_settings").select("value").eq("key", "max_upload_mb").maybeSingle(),
@@ -33,6 +34,9 @@ export default async function PrDetailPage({ params }: { params: Promise<{ id: s
       ? supabase.from("pr_private_notes").select("id, body, created_at, author:profiles(full_name)")
           .eq("pr_id", id).order("created_at", { ascending: false })
       : empty,
+    supabase.from("pr_attachments")
+      .select("id, filename, size_bytes, mime_type, created_at, superseded_at, superseded_reason, office_id, is_pr_document, uploader:profiles(full_name), office:offices(name)")
+      .eq("pr_id", id).order("created_at"),
   ]);
 
   const actions = availableActions({
@@ -76,6 +80,7 @@ export default async function PrDetailPage({ params }: { params: Promise<{ id: s
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="timeline">Timeline</TabsTrigger>
           <TabsTrigger value="remarks">Remarks ({remarks.data?.length ?? 0})</TabsTrigger>
+          <TabsTrigger value="attachments">Attachments ({attachments.data?.length ?? 0})</TabsTrigger>
           {officeId && <TabsTrigger value="notes">Private notes</TabsTrigger>}
         </TabsList>
         <TabsContent value="details" className="space-y-4">
@@ -90,6 +95,11 @@ export default async function PrDetailPage({ params }: { params: Promise<{ id: s
         <TabsContent value="timeline"><PrTimeline events={timeline.data ?? []} totalSteps={pr.total_steps ?? 0} /></TabsContent>
         <TabsContent value="remarks">
           <RemarksPanel prId={id} remarks={(remarks.data ?? []) as never} canAdd={actions.has("add_remark")} />
+        </TabsContent>
+        <TabsContent value="attachments">
+          <AttachmentsPanel prId={id} attachments={(attachments.data ?? []) as never}
+            canUpload={actions.has("add_attachment")} myOfficeId={officeId ?? null}
+            maxMb={maxMb} />
         </TabsContent>
         {officeId && (
           <TabsContent value="notes">
