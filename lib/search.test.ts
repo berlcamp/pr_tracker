@@ -12,3 +12,10 @@ test("parseListParams applies defaults and whitelists", () => {
   expect(p).toMatchObject({ page: 3, size: 50, sort: "amount", dir: "asc", state: "received", q: "paper" });
   expect(parseListParams({ size: "9999", sort: "password.asc", state: "hacked" })).toMatchObject({ size: 25, sort: "created_at", state: "" });
 });
+
+import { sanitizeSearch } from "./search";
+
+test("sanitizeSearch strips PostgREST filter syntax", () => {
+  expect(sanitizeSearch("paper,(x)*%")).toBe("paper x");
+  expect(sanitizeSearch('a"b\\c:d')).toBe("a b c d");
+});

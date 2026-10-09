@@ -40,3 +40,8 @@ export function parseListParams(sp: Record<string, string | string[] | undefined
     max: isNum(one(sp.max)) ? one(sp.max) : "",
   };
 }
+
+/** Removes characters that have meaning inside a PostgREST `or=(…)` filter. */
+export function sanitizeSearch(q: string): string {
+  return q.replace(/[,()*%"\\:]/g, " ").replace(/\s+/g, " ").trim();
+}
