@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a Next.js + Supabase web app that tracks where each LGU Purchase Request physically is and what its processing status is, with an immutable audit trail, office dashboards, a notification bell, and a printable QR routing slip.
+**Goal:** Build a Next.js + Supabase web app that tracks where each LGU Purchase Request physically is and what its processing status is. Each PR is registered with a short header and an uploaded signed PR document. The app keeps an immutable audit trail and provides office dashboards, a notification bell, and a printable QR routing slip.
 
 **Architecture:** All workflow rules live in Postgres `SECURITY DEFINER` functions in the `pr_tracker` schema. Each function locks the PR row, validates the action, applies it, and writes the audit event and notifications in one transaction. Row Level Security limits reads to involved offices. Next.js (App Router) server components read through RLS-protected views, and server actions call the RPC functions. There is no service-role key and no Realtime.
 
@@ -35,6 +35,10 @@
   - `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
 - **Every button that changes data opens a confirmation modal.** Any reason or remark is entered inside that modal, and the confirm button is disabled while the action runs.
 - **Every tabular view uses the shared `DataTable` component** (TanStack Table v8).
+- **PRs carry no line items.** The header is: date, purpose, amount > 0, requested by, plus optional RC code and fund cluster. The signed PR is uploaded as the **PR document** (PDF/JPG/PNG).
+  - A PR **cannot be forwarded** without a current PR document.
+  - Only the origin office replaces it, and only while the PR is editable.
+  - The system prints **only the routing slip**, never the PR.
 - The layout has a **dark sidebar** and a light content area.
 - Super admin is `berlcamp@gmail.com`. It is seeded by migration.
 - Office codes: `GSO`, `MAYOR`, `BUDGET`, `BAC` (Bids and Awards Committee), `ACCTG`, `TREAS`.
@@ -95,8 +99,13 @@
    - Returning to GSO from Mayor must restore GSO's step.
    - An off-route forward keeps the step.
    Test: Task 8 Step 1.
-4. **An uninvolved office reads a PR, its line items, events or private notes through the REST API**, by guessing an ID. It must get zero rows. Admins must still not see another office's private notes. Test: Task 10 Step 1.
-5. **Bad line items:** zero items, quantity ≤ 0, negative unit cost, or fractional amounts. These must be rejected with a line-specific message, and totals must round half-up to centavos exactly as Postgres `round(numeric, 2)` does, in both DB and UI. Test: Task 7 Step 1 and Task 15 Step 1 (`lineTotal`).
+4. **An uninvolved office reads a PR, its attachments, events or private notes through the REST API**, by guessing an ID. It must get zero rows. Admins must still not see another office's private notes. Test: Task 10 Step 1.
+5. **Missing or wrong PR document.**
+   - Forwarding a PR that has no current PR document must fail with "Upload the PR document before forwarding".
+   - A non-origin office, or the origin office while the PR is locked, must not be able to upload a replacement.
+   - A replacement must supersede the previous file, so exactly one current PR document exists.
+   - An amount ≤ 0 is rejected in both the DB and the form.
+   Tests: Task 8 Step 1, Task 12 Step 1, Task 13 Step 1.
 
 ---
 
@@ -149,7 +158,7 @@ pr-tracker/
 │   └── pr/
 │       ├── movement-badge.tsx  pr-header.tsx  pr-form.tsx
 │       ├── pr-action-bar.tsx   receive-button.tsx pr-timeline.tsx remarks-panel.tsx
-│       ├── private-notes-panel.tsx attachments-panel.tsx line-items-table.tsx rs-link.tsx
+│       ├── private-notes-panel.tsx attachments-panel.tsx pr-document-card.tsx rs-link.tsx
 │       └── tracking-view.tsx   routing-slip.tsx
 ├── lib/
 │   ├── types.ts                           # domain types shared by UI
@@ -159,7 +168,7 @@ pr-tracker/
 │   ├── format.ts                          # dates, money, location line
 │   ├── csv.ts
 │   ├── search.ts                          # global search target + list params
-│   └── pr/{schema.ts,permissions.ts,timeline.ts,routing-slip.ts,files.ts}
+│   └── pr/{schema.ts,permissions.ts,timeline.ts,routing-slip.ts,files.ts,upload-client.ts}
 ├── supabase/
 │   ├── config.toml
 │   ├── seed.sql                           # LOCAL ONLY: pgTAP helpers + demo users
@@ -298,8 +307,8 @@ git commit -m "chore: scaffold Next.js 16 app with shadcn, vitest, supabase deps
   - `tests.make_user(p_email text, p_office_code text, p_role pr_tracker.user_role default 'staff', p_active boolean default true) returns uuid` (returns the profile id)
   - `tests.authenticate_as(p_email text) returns void`
   - `tests.clear_authentication() returns void`
-  - `tests.sample_header() returns jsonb`
-  - `tests.sample_items() returns jsonb`
+  - `tests.sample_header() returns jsonb` (amount 2695.00)
+  - `tests.attach_pr_document(p_pr_id uuid) returns uuid` (`SECURITY DEFINER`). It inserts a current PR-document attachment row directly, so tests that forward a PR don't need Storage.
 
 - [ ] **Step 1: Init Supabase and expose the schema**
 
@@ -417,18 +426,23 @@ end $$;
 create or replace function tests.sample_header()
 returns jsonb language sql as $$
   select jsonb_build_object(
-    'pr_date', '2026-10-09', 'purpose', 'Office supplies for Q4',
+    'pr_date', '2026-10-09', 'purpose', 'Office supplies for Q4', 'amount', 2695.00,
     'responsibility_center_code', '1011', 'fund_cluster', '01',
-    'requested_by_name', 'Maria Santos', 'requested_by_designation', 'Social Welfare Officer',
-    'approved_by_name', 'Hon. Juan Cruz', 'approved_by_designation', 'City Mayor');
+    'requested_by_name', 'Maria Santos', 'requested_by_designation', 'Social Welfare Officer');
 $$;
 
-create or replace function tests.sample_items()
-returns jsonb language sql as $$
-  select jsonb_build_array(
-    jsonb_build_object('stock_no', 'SP-001', 'unit', 'ream', 'description', 'Bond paper A4', 'quantity', 10, 'unit_cost', 245.50),
-    jsonb_build_object('stock_no', '', 'unit', 'box', 'description', 'Ballpen black', 'quantity', 2, 'unit_cost', 120));
-$$;
+-- Lets tests satisfy "PR document required before forwarding" without touching Storage.
+create or replace function tests.attach_pr_document(p_pr_id uuid)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare v_id uuid;
+begin
+  insert into pr_tracker.pr_attachments (pr_id, office_id, uploaded_by, storage_path, filename, size_bytes, mime_type, is_pr_document)
+  select p.id, p.origin_office_id, p.created_by, p.id || '/test-' || gen_random_uuid() || '.pdf', 'signed-pr.pdf', 1000,
+         'application/pdf', true
+    from pr_tracker.purchase_requests p where p.id = p_pr_id
+  returning id into v_id;
+  return v_id;
+end $$;
 
 grant execute on all functions in schema tests to authenticated, anon;
 ```
@@ -452,7 +466,7 @@ create type pr_tracker.movement_state as enum ('draft', 'in_transit', 'received'
 create type pr_tracker.event_type as enum (
   'created', 'edited', 'forwarded', 'recalled', 'received', 'returned', 'status_changed',
   'remark_added', 'private_note_added', 'attachment_added', 'attachment_superseded',
-  'pr_no_assigned', 'mode_set', 'completed', 'cancelled', 'followed', 'unfollowed');
+  'pr_document_uploaded', 'pr_no_assigned', 'mode_set', 'completed', 'cancelled', 'followed', 'unfollowed');
 
 create or replace function pr_tracker.touch_updated_at()
 returns trigger language plpgsql set search_path = '' as $$
@@ -540,13 +554,12 @@ git commit -m "feat(db): pr_tracker schema, core tables, pgTAP helpers"
 **Interfaces:**
 - Consumes: the Task 2 tables and enums.
 - Produces tables:
-  - `purchase_requests` (incl. `sent_by_office_id`, `prev_route_step`, `current_purpose`)
-  - `pr_line_items` (generated `total_cost`)
+  - `purchase_requests` (incl. `amount`, `sent_by_office_id`, `prev_route_step`, `current_purpose`; no line items, no approved-by fields)
   - `pr_involved_offices`
   - `pr_events` (bigint identity id)
   - `pr_remarks` (`office_id` nullable, for admins without an office)
   - `pr_private_notes`
-  - `pr_attachments`
+  - `pr_attachments` (incl. `is_pr_document`; at most one current PR document per PR)
   - `pr_followers`
   - `notifications` (bigint id)
   - `notification_reads`
@@ -559,7 +572,7 @@ begin;
 select plan(9);
 
 select has_table('pr_tracker', 'purchase_requests', 'purchase_requests exists');
-select has_table('pr_tracker', 'pr_line_items', 'pr_line_items exists');
+select has_table('pr_tracker', 'pr_attachments', 'pr_attachments exists');
 select has_table('pr_tracker', 'pr_events', 'pr_events exists');
 select has_table('pr_tracker', 'notifications', 'notifications exists');
 select has_column('pr_tracker', 'purchase_requests', 'route_step', 'route_step column');
@@ -568,24 +581,29 @@ select has_column('pr_tracker', 'purchase_requests', 'route_step', 'route_step c
 insert into pr_tracker.offices (id, code, name) values ('00000000-0000-0000-0000-0000000000a1', 'TST', 'Test Office');
 insert into pr_tracker.profiles (id, email, full_name, office_id)
   values ('00000000-0000-0000-0000-0000000000b1', 'fixture@x.test', 'Fixture', '00000000-0000-0000-0000-0000000000a1');
-insert into pr_tracker.purchase_requests (id, routing_slip_no, origin_office_id, purpose, requested_by_name, current_office_id, created_by)
-  values ('00000000-0000-0000-0000-0000000000c1', 'RS-TEST', '00000000-0000-0000-0000-0000000000a1', 'Fixture', 'Someone',
+insert into pr_tracker.purchase_requests (id, routing_slip_no, origin_office_id, purpose, amount, requested_by_name, current_office_id, created_by)
+  values ('00000000-0000-0000-0000-0000000000c1', 'RS-TEST', '00000000-0000-0000-0000-0000000000a1', 'Fixture', 1500, 'Someone',
           '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000b1');
-insert into pr_tracker.pr_line_items (pr_id, line_no, unit, description, quantity, unit_cost)
-  values ('00000000-0000-0000-0000-0000000000c1', 1, 'pc', 'Thing', 1.5, 10.25);
 
-select is((select total_cost from pr_tracker.pr_line_items where pr_id = '00000000-0000-0000-0000-0000000000c1'),
-          15.38::numeric, 'total_cost = round(qty*cost, 2), half away from zero');
+select throws_ok(
+  $$insert into pr_tracker.purchase_requests (routing_slip_no, origin_office_id, purpose, amount, requested_by_name, current_office_id, created_by)
+    values ('RS-ZERO', '00000000-0000-0000-0000-0000000000a1', 'Zero', 0, 'Someone',
+            '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000b1')$$,
+  '23514', null, 'amount must be > 0');
 
 insert into pr_tracker.pr_events (pr_id, event_type, actor_id)
   values ('00000000-0000-0000-0000-0000000000c1', 'created', '00000000-0000-0000-0000-0000000000b1');
 
 select throws_like($$update pr_tracker.pr_events set remark = 'x'$$, '%append-only%', 'events cannot be updated');
 select throws_like($$delete from pr_tracker.pr_events$$, '%append-only%', 'events cannot be deleted');
+insert into pr_tracker.pr_attachments (pr_id, office_id, uploaded_by, storage_path, filename, size_bytes, mime_type, is_pr_document)
+  values ('00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000b1',
+          'c1/a.pdf', 'a.pdf', 10, 'application/pdf', true);
 select throws_ok(
-  $$insert into pr_tracker.pr_line_items (pr_id, line_no, unit, description, quantity, unit_cost)
-    values ('00000000-0000-0000-0000-0000000000c1', 2, 'pc', 'Bad', 0, 1)$$,
-  '23514', null, 'quantity must be > 0');
+  $$insert into pr_tracker.pr_attachments (pr_id, office_id, uploaded_by, storage_path, filename, size_bytes, mime_type, is_pr_document)
+    values ('00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000b1',
+            'c1/b.pdf', 'b.pdf', 10, 'application/pdf', true)$$,
+  '23505', null, 'only one current PR document per PR');
 
 select * from finish();
 rollback;
@@ -610,10 +628,8 @@ create table pr_tracker.purchase_requests (
   purpose text not null check (length(trim(purpose)) > 0),
   requested_by_name text not null check (length(trim(requested_by_name)) > 0),
   requested_by_designation text,
-  approved_by_name text,
-  approved_by_designation text,
+  amount numeric(16,2) not null check (amount > 0),
   mode_of_procurement text,
-  grand_total numeric(16,2) not null default 0,
   movement_state pr_tracker.movement_state not null default 'draft',
   current_office_id uuid not null references pr_tracker.offices(id),
   current_status_id uuid references pr_tracker.office_statuses(id),
@@ -632,19 +648,6 @@ create index purchase_requests_origin_idx on pr_tracker.purchase_requests (origi
 create index purchase_requests_sent_by_idx on pr_tracker.purchase_requests (sent_by_office_id);
 create trigger purchase_requests_touch before update on pr_tracker.purchase_requests
   for each row execute function pr_tracker.touch_updated_at();
-
-create table pr_tracker.pr_line_items (
-  id uuid primary key default gen_random_uuid(),
-  pr_id uuid not null references pr_tracker.purchase_requests(id) on delete cascade,
-  line_no int not null check (line_no >= 1),
-  stock_no text,
-  unit text not null check (length(trim(unit)) > 0),
-  description text not null check (length(trim(description)) > 0),
-  quantity numeric(14,2) not null check (quantity > 0),
-  unit_cost numeric(14,2) not null check (unit_cost >= 0),
-  total_cost numeric(16,2) generated always as (round(quantity * unit_cost, 2)) stored,
-  unique (pr_id, line_no)
-);
 
 create table pr_tracker.pr_involved_offices (
   pr_id uuid not null references pr_tracker.purchase_requests(id) on delete cascade,
@@ -713,11 +716,14 @@ create table pr_tracker.pr_attachments (
   filename text not null,
   size_bytes bigint not null check (size_bytes > 0),
   mime_type text not null,
+  is_pr_document boolean not null default false,
   superseded_at timestamptz,
   superseded_reason text,
   created_at timestamptz not null default now()
 );
 create index pr_attachments_pr_idx on pr_tracker.pr_attachments (pr_id);
+create unique index pr_attachments_one_current_pr_document on pr_tracker.pr_attachments (pr_id)
+  where is_pr_document and superseded_at is null;
 
 create table pr_tracker.pr_followers (
   pr_id uuid not null references pr_tracker.purchase_requests(id) on delete cascade,
@@ -982,7 +988,6 @@ alter table pr_tracker.default_route_steps enable row level security;
 alter table pr_tracker.office_statuses enable row level security;
 alter table pr_tracker.routing_slip_counters enable row level security;
 alter table pr_tracker.purchase_requests enable row level security;
-alter table pr_tracker.pr_line_items enable row level security;
 alter table pr_tracker.pr_involved_offices enable row level security;
 alter table pr_tracker.pr_events enable row level security;
 alter table pr_tracker.pr_remarks enable row level security;
@@ -1005,8 +1010,6 @@ create policy statuses_read on pr_tracker.office_statuses for select to authenti
 
 create policy prs_read on pr_tracker.purchase_requests for select to authenticated
   using (pr_tracker.can_view_pr(id));
-create policy items_read on pr_tracker.pr_line_items for select to authenticated
-  using (pr_tracker.can_view_pr(pr_id));
 create policy involved_read on pr_tracker.pr_involved_offices for select to authenticated
   using (pr_tracker.can_view_pr(pr_id));
 create policy remarks_read on pr_tracker.pr_remarks for select to authenticated
@@ -1325,7 +1328,7 @@ git commit -m "feat(db): allowlisted profile linking with provider check"
 
 ---
 
-### Task 7: Create and edit PRs, with routing slip numbering
+### Task 7: Create and edit PRs (header only), with routing slip numbering
 
 **Files:**
 - Create: `supabase/migrations/20261009000600_pr_create_edit.sql`, `supabase/tests/06_create_edit.test.sql`
@@ -1333,32 +1336,31 @@ git commit -m "feat(db): allowlisted profile linking with provider check"
 **Interfaces:**
 - Consumes: the Task 4 internal helpers.
 - Produces:
-  - `pr_tracker.create_pr(p_header jsonb, p_items jsonb) → uuid`
-  - `pr_tracker.update_pr_content(p_pr_id uuid, p_header jsonb, p_items jsonb) → void`
+  - `pr_tracker.create_pr(p_header jsonb) → uuid`
+  - `pr_tracker.update_pr_content(p_pr_id uuid, p_header jsonb) → void`
 - Header JSON keys:
   - `pr_date` (`YYYY-MM-DD`, optional, defaults to today in Manila)
   - `purpose` (required)
-  - `responsibility_center_code`
-  - `fund_cluster`
+  - `amount` (required, > 0)
   - `requested_by_name` (required)
   - `requested_by_designation`
-  - `approved_by_name`
-  - `approved_by_designation`
-- Item JSON keys: `stock_no`, `unit`, `description`, `quantity`, `unit_cost`.
-- Internal helpers: `_next_routing_slip_no()`, `_validate_header(jsonb)`, `_replace_line_items(uuid, jsonb)`, `_pr_snapshot(uuid) → jsonb` (`{header:{…, grand_total}, items:[…]}`).
+  - `responsibility_center_code`
+  - `fund_cluster`
+- Internal helpers: `_next_routing_slip_no()`, `_validate_header(jsonb)`, `_pr_snapshot(uuid) → jsonb` (`{header:{pr_date, purpose, amount, responsibility_center_code, fund_cluster, requested_by_name, requested_by_designation}}`).
+- The PR document is uploaded separately (Task 9 `register_attachment`). The create/edit functions never touch files.
 
-- [ ] **Step 1: Write the failing test** (Review Focus #5) `supabase/tests/06_create_edit.test.sql`
+- [ ] **Step 1: Write the failing test** (Review Focus #5, amount part) `supabase/tests/06_create_edit.test.sql`
 
 ```sql
 begin;
-select plan(13);
+select plan(11);
 
 select tests.make_user('c1@x.test', 'CSWD');
 select tests.make_user('g1@x.test', 'GSO');
 
 select tests.authenticate_as('c1@x.test');
-select set_config('tests.pr1', pr_tracker.create_pr(tests.sample_header(), tests.sample_items())::text, true);
-select set_config('tests.pr2', pr_tracker.create_pr(tests.sample_header(), tests.sample_items())::text, true);
+select set_config('tests.pr1', pr_tracker.create_pr(tests.sample_header())::text, true);
+select set_config('tests.pr2', pr_tracker.create_pr(tests.sample_header())::text, true);
 
 select matches((select routing_slip_no from pr_tracker.purchase_requests where id = current_setting('tests.pr1')::uuid),
                '^RS-\d{4}-\d{2}-\d{5}$', 'routing slip format');
@@ -1367,8 +1369,8 @@ select is(
      from pr_tracker.purchase_requests a, pr_tracker.purchase_requests b
     where a.id = current_setting('tests.pr1')::uuid and b.id = current_setting('tests.pr2')::uuid),
   1, 'sequence increments by one');
-select is((select grand_total from pr_tracker.purchase_requests where id = current_setting('tests.pr1')::uuid),
-          2695.00::numeric, 'grand total = 10*245.50 + 2*120');
+select is((select amount from pr_tracker.purchase_requests where id = current_setting('tests.pr1')::uuid),
+          2695.00::numeric, 'amount stored');
 select is((select movement_state::text from pr_tracker.purchase_requests where id = current_setting('tests.pr1')::uuid),
           'draft', 'new PR is draft');
 select is((select count(*)::int from pr_tracker.pr_followers where pr_id = current_setting('tests.pr1')::uuid), 1,
@@ -1376,35 +1378,27 @@ select is((select count(*)::int from pr_tracker.pr_followers where pr_id = curre
 select is((select event_type::text from pr_tracker.pr_events where pr_id = current_setting('tests.pr1')::uuid), 'created',
           'created event logged');
 
-select throws_like($$select pr_tracker.create_pr(tests.sample_header(), '[]'::jsonb)$$,
-                   '%at least one line item%', 'empty items rejected');
-select throws_like($$select pr_tracker.create_pr(tests.sample_header(),
-                     '[{"unit":"pc","description":"x","quantity":0,"unit_cost":1}]'::jsonb)$$,
-                   'Line 1: quantity must be greater than zero', 'zero quantity rejected with line number');
-select throws_like($$select pr_tracker.create_pr(tests.sample_header(),
-                     '[{"unit":"pc","description":"x","quantity":1,"unit_cost":1},{"unit":"pc","description":"y","quantity":1,"unit_cost":-5}]'::jsonb)$$,
-                   'Line 2: unit cost cannot be negative', 'negative cost rejected');
-select throws_like($$select pr_tracker.create_pr(tests.sample_header() - 'purpose', tests.sample_items())$$,
+select throws_like($$select pr_tracker.create_pr(tests.sample_header() || '{"amount": 0}')$$,
+                   'Amount must be greater than zero', 'zero amount rejected');
+select throws_like($$select pr_tracker.create_pr(tests.sample_header() - 'purpose')$$,
                    'Purpose is required', 'purpose required');
 
--- edit while draft: allowed, no snapshot
-select lives_ok(format($$select pr_tracker.update_pr_content(%L, tests.sample_header() || '{"purpose":"Changed"}', tests.sample_items())$$,
+-- edit while draft: allowed
+select lives_ok(format($$select pr_tracker.update_pr_content(%L, tests.sample_header() || '{"purpose":"Changed"}')$$,
                        current_setting('tests.pr1')), 'origin edits draft');
 
 -- other office cannot edit
 select tests.clear_authentication();
 select tests.authenticate_as('g1@x.test');
-select throws_like(format($$select pr_tracker.update_pr_content(%L, tests.sample_header(), tests.sample_items())$$,
-                          current_setting('tests.pr1')),
+select throws_like(format($$select pr_tracker.update_pr_content(%L, tests.sample_header())$$, current_setting('tests.pr1')),
                    'Only the originating office can edit this PR', 'non-origin cannot edit');
 
--- locked once forwarded (forward_pr is defined in Task 8; simulate lock directly as owner)
+-- locked once forwarded (simulate as owner; forward_pr is Task 8)
 select tests.clear_authentication();
 update pr_tracker.purchase_requests set movement_state = 'in_transit', first_forwarded_at = now()
  where id = current_setting('tests.pr1')::uuid;
 select tests.authenticate_as('c1@x.test');
-select throws_like(format($$select pr_tracker.update_pr_content(%L, tests.sample_header(), tests.sample_items())$$,
-                          current_setting('tests.pr1')),
+select throws_like(format($$select pr_tracker.update_pr_content(%L, tests.sample_header())$$, current_setting('tests.pr1')),
                    'This PR is locked%', 'locked after forwarding');
 
 select * from finish();
@@ -1414,7 +1408,7 @@ rollback;
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `supabase test db`
-Expected: FAIL, `function pr_tracker.create_pr(jsonb, jsonb) does not exist`.
+Expected: FAIL, `function pr_tracker.create_pr(jsonb) does not exist`.
 
 - [ ] **Step 3: Write the migration** `supabase/migrations/20261009000600_pr_create_edit.sql`
 
@@ -1437,58 +1431,21 @@ returns void language plpgsql immutable set search_path = '' as $$
 begin
   if pr_tracker._clean(p_header ->> 'purpose') is null then raise exception 'Purpose is required'; end if;
   if pr_tracker._clean(p_header ->> 'requested_by_name') is null then raise exception 'Requested by is required'; end if;
-end $$;
-
-create or replace function pr_tracker._replace_line_items(p_pr_id uuid, p_items jsonb)
-returns void language plpgsql security definer set search_path = '' as $$
-declare v_bad record;
-begin
-  if jsonb_typeof(p_items) is distinct from 'array' or jsonb_array_length(p_items) = 0 then
-    raise exception 'A purchase request needs at least one line item';
+  if (p_header ->> 'amount') is null or (p_header ->> 'amount')::numeric <= 0 then
+    raise exception 'Amount must be greater than zero';
   end if;
-
-  for v_bad in
-    select t.ord, t.item from jsonb_array_elements(p_items) with ordinality as t(item, ord) order by t.ord
-  loop
-    if pr_tracker._clean(v_bad.item ->> 'unit') is null then
-      raise exception 'Line %: unit is required', v_bad.ord; end if;
-    if pr_tracker._clean(v_bad.item ->> 'description') is null then
-      raise exception 'Line %: description is required', v_bad.ord; end if;
-    if coalesce((v_bad.item ->> 'quantity')::numeric, 0) <= 0 then
-      raise exception 'Line %: quantity must be greater than zero', v_bad.ord; end if;
-    if (v_bad.item ->> 'unit_cost') is null or (v_bad.item ->> 'unit_cost')::numeric < 0 then
-      raise exception 'Line %: unit cost cannot be negative', v_bad.ord; end if;
-  end loop;
-
-  delete from pr_tracker.pr_line_items where pr_id = p_pr_id;
-  insert into pr_tracker.pr_line_items (pr_id, line_no, stock_no, unit, description, quantity, unit_cost)
-  select p_pr_id, t.ord, pr_tracker._clean(t.item ->> 'stock_no'), trim(t.item ->> 'unit'),
-         trim(t.item ->> 'description'), (t.item ->> 'quantity')::numeric, (t.item ->> 'unit_cost')::numeric
-    from jsonb_array_elements(p_items) with ordinality as t(item, ord);
-
-  update pr_tracker.purchase_requests
-     set grand_total = (select coalesce(sum(i.total_cost), 0) from pr_tracker.pr_line_items i where i.pr_id = p_pr_id)
-   where id = p_pr_id;
 end $$;
 
 create or replace function pr_tracker._pr_snapshot(p_pr_id uuid)
 returns jsonb language sql stable security definer set search_path = '' as $$
-  select jsonb_build_object(
-    'header', jsonb_build_object(
-      'pr_date', p.pr_date, 'purpose', p.purpose,
-      'responsibility_center_code', p.responsibility_center_code, 'fund_cluster', p.fund_cluster,
-      'requested_by_name', p.requested_by_name, 'requested_by_designation', p.requested_by_designation,
-      'approved_by_name', p.approved_by_name, 'approved_by_designation', p.approved_by_designation,
-      'grand_total', p.grand_total),
-    'items', coalesce((
-      select jsonb_agg(jsonb_build_object(
-               'line_no', i.line_no, 'stock_no', i.stock_no, 'unit', i.unit, 'description', i.description,
-               'quantity', i.quantity, 'unit_cost', i.unit_cost, 'total_cost', i.total_cost) order by i.line_no)
-        from pr_tracker.pr_line_items i where i.pr_id = p.id), '[]'::jsonb))
+  select jsonb_build_object('header', jsonb_build_object(
+    'pr_date', p.pr_date, 'purpose', p.purpose, 'amount', p.amount,
+    'responsibility_center_code', p.responsibility_center_code, 'fund_cluster', p.fund_cluster,
+    'requested_by_name', p.requested_by_name, 'requested_by_designation', p.requested_by_designation))
   from pr_tracker.purchase_requests p where p.id = p_pr_id
 $$;
 
-create or replace function pr_tracker.create_pr(p_header jsonb, p_items jsonb)
+create or replace function pr_tracker.create_pr(p_header jsonb)
 returns uuid language plpgsql security definer set search_path = '' as $$
 declare
   v_actor pr_tracker.profiles := pr_tracker._actor_with_office();
@@ -1497,20 +1454,17 @@ begin
   perform pr_tracker._validate_header(p_header);
 
   insert into pr_tracker.purchase_requests (
-    routing_slip_no, origin_office_id, responsibility_center_code, fund_cluster, pr_date, purpose,
-    requested_by_name, requested_by_designation, approved_by_name, approved_by_designation,
-    current_office_id, created_by)
+    routing_slip_no, origin_office_id, responsibility_center_code, fund_cluster, pr_date, purpose, amount,
+    requested_by_name, requested_by_designation, current_office_id, created_by)
   values (
     pr_tracker._next_routing_slip_no(), v_actor.office_id,
     pr_tracker._clean(p_header ->> 'responsibility_center_code'), pr_tracker._clean(p_header ->> 'fund_cluster'),
     coalesce((p_header ->> 'pr_date')::date, (now() at time zone 'Asia/Manila')::date),
-    trim(p_header ->> 'purpose'),
+    trim(p_header ->> 'purpose'), round((p_header ->> 'amount')::numeric, 2),
     trim(p_header ->> 'requested_by_name'), pr_tracker._clean(p_header ->> 'requested_by_designation'),
-    pr_tracker._clean(p_header ->> 'approved_by_name'), pr_tracker._clean(p_header ->> 'approved_by_designation'),
     v_actor.office_id, v_actor.id)
   returning id into v_id;
 
-  perform pr_tracker._replace_line_items(v_id, p_items);
   insert into pr_tracker.pr_involved_offices (pr_id, office_id) values (v_id, v_actor.office_id);
   insert into pr_tracker.pr_followers (pr_id, office_id) values (v_id, v_actor.office_id);
   perform pr_tracker._log_event(v_id, 'created', v_actor,
@@ -1518,7 +1472,13 @@ begin
   return v_id;
 end $$;
 
-create or replace function pr_tracker.update_pr_content(p_pr_id uuid, p_header jsonb, p_items jsonb)
+create or replace function pr_tracker._can_origin_edit(p_pr pr_tracker.purchase_requests)
+returns boolean language sql immutable set search_path = '' as $$
+  select p_pr.movement_state = 'draft'
+      or (p_pr.movement_state = 'received' and p_pr.current_office_id = p_pr.origin_office_id)
+$$;
+
+create or replace function pr_tracker.update_pr_content(p_pr_id uuid, p_header jsonb)
 returns void language plpgsql security definer set search_path = '' as $$
 declare
   v_actor pr_tracker.profiles := pr_tracker._actor_with_office();
@@ -1528,8 +1488,7 @@ begin
   if v_actor.office_id <> v_pr.origin_office_id then
     raise exception 'Only the originating office can edit this PR';
   end if;
-  if not (v_pr.movement_state = 'draft'
-          or (v_pr.movement_state = 'received' and v_pr.current_office_id = v_pr.origin_office_id)) then
+  if not pr_tracker._can_origin_edit(v_pr) then
     raise exception 'This PR is locked. It can only be edited while in Draft or after it is returned to your office';
   end if;
   perform pr_tracker._validate_header(p_header);
@@ -1543,13 +1502,10 @@ begin
     fund_cluster = pr_tracker._clean(p_header ->> 'fund_cluster'),
     pr_date = coalesce((p_header ->> 'pr_date')::date, pr_date),
     purpose = trim(p_header ->> 'purpose'),
+    amount = round((p_header ->> 'amount')::numeric, 2),
     requested_by_name = trim(p_header ->> 'requested_by_name'),
-    requested_by_designation = pr_tracker._clean(p_header ->> 'requested_by_designation'),
-    approved_by_name = pr_tracker._clean(p_header ->> 'approved_by_name'),
-    approved_by_designation = pr_tracker._clean(p_header ->> 'approved_by_designation')
+    requested_by_designation = pr_tracker._clean(p_header ->> 'requested_by_designation')
   where id = p_pr_id;
-
-  perform pr_tracker._replace_line_items(p_pr_id, p_items);
 
   perform pr_tracker._log_event(p_pr_id, 'edited', v_actor,
     case when v_before is null then '{}'::jsonb
@@ -1557,19 +1513,19 @@ begin
     end);
 end $$;
 
-grant execute on function pr_tracker.create_pr(jsonb, jsonb), pr_tracker.update_pr_content(uuid, jsonb, jsonb) to authenticated;
+grant execute on function pr_tracker.create_pr(jsonb), pr_tracker.update_pr_content(uuid, jsonb) to authenticated;
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `supabase db reset && supabase test db`
-Expected: `06_create_edit` ok, 13/13.
+Expected: `06_create_edit` ok, 11/11.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add supabase
-git commit -m "feat(db): create/edit PR with line-item validation and routing slip numbering"
+git commit -m "feat(db): create/edit PR header with amount validation and routing slip numbering"
 ```
 
 ---
@@ -1583,17 +1539,17 @@ git commit -m "feat(db): create/edit PR with line-item validation and routing sl
 - Consumes: the Task 4 and Task 7 functions.
 - Produces:
   - `pr_tracker.suggest_next_step(p_pr_id uuid) → jsonb`. Shape: `{route_step, total_steps, next: {step_order, office_id, office_name, purpose} | null}`.
-  - `pr_tracker.forward_pr(p_pr_id uuid, p_to_office_id uuid, p_override_reason text default null, p_remark text default null) → void`
+  - `pr_tracker.forward_pr(p_pr_id uuid, p_to_office_id uuid, p_override_reason text default null, p_remark text default null) → void` (requires a current PR document)
   - `pr_tracker.receive_pr(p_pr_id uuid) → void`
   - `pr_tracker.return_pr(p_pr_id uuid, p_to_office_id uuid, p_reason text) → void`
   - `pr_tracker.recall_pr(p_pr_id uuid, p_reason text default null) → void`
 - Internal: `_next_route_step(p_route_step int, p_holder_office uuid) → default_route_steps`. It returns the first step after `p_route_step` whose office differs from the holder, or null.
 
-- [ ] **Step 1: Write the failing test** (Review Focus #2, #3) `supabase/tests/07_movement.test.sql`
+- [ ] **Step 1: Write the failing test** (Review Focus #2, #3, #5) `supabase/tests/07_movement.test.sql`
 
 ```sql
 begin;
-select plan(22);
+select plan(23);
 
 select tests.make_user('mc@x.test', 'CSWD');
 select tests.make_user('mg@x.test', 'GSO');
@@ -1611,7 +1567,11 @@ select (select id from pr_tracker.offices where code = 'GSO') gso,
 grant select on ids to authenticated;
 
 select tests.authenticate_as('mc@x.test');
-select set_config('tests.pr', pr_tracker.create_pr(tests.sample_header(), tests.sample_items())::text, true);
+select set_config('tests.pr', pr_tracker.create_pr(tests.sample_header())::text, true);
+
+select throws_like(format('select pr_tracker.forward_pr(%L, %L)', current_setting('tests.pr'), (select gso from ids)),
+                   'Upload the PR document before forwarding', 'cannot forward without PR document');
+select tests.attach_pr_document(current_setting('tests.pr')::uuid);
 
 select is(pr_tracker.suggest_next_step(current_setting('tests.pr')::uuid) -> 'next' ->> 'office_name',
           'General Services Office', 'draft suggests step 1 GSO');
@@ -1748,6 +1708,11 @@ begin
   end if;
   if not exists (select 1 from pr_tracker.offices where id = p_to_office_id and active) then
     raise exception 'Destination office not found or inactive';
+  end if;
+
+  if not exists (select 1 from pr_tracker.pr_attachments
+                  where pr_id = p_pr_id and is_pr_document and superseded_at is null) then
+    raise exception 'Upload the PR document before forwarding';
   end if;
 
   v_next := pr_tracker._next_route_step(v_pr.route_step, v_actor.office_id);
@@ -1903,7 +1868,7 @@ to authenticated;
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `supabase db reset && supabase test db`
-Expected: `07_movement` ok, 22/22. If the `Already received by Test mg (GSO)` assertion fails, check that `tests.make_user` builds `full_name` as `'Test ' || split_part(email,'@',1)`.
+Expected: `07_movement` ok, 23/23. If the `Already received by Test mg (GSO)` assertion fails, check that `tests.make_user` builds `full_name` as `'Test ' || split_part(email,'@',1)`.
 
 - [ ] **Step 5: Commit**
 
@@ -1924,8 +1889,13 @@ git commit -m "feat(db): forward/receive/return/recall with route position and n
   - `set_status(p_pr_id uuid, p_status_id uuid, p_remark text default null) → void`
   - `add_remark(p_pr_id uuid, p_body text) → void`
   - `add_private_note(p_pr_id uuid, p_body text) → void`
-  - `register_attachment(p_pr_id uuid, p_storage_path text, p_filename text, p_size_bytes bigint, p_mime_type text) → uuid`
-  - `supersede_attachment(p_attachment_id uuid, p_reason text) → void`
+  - `register_attachment(p_pr_id uuid, p_storage_path text, p_filename text, p_size_bytes bigint, p_mime_type text, p_is_pr_document boolean default false) → uuid`
+    - When `p_is_pr_document` is true:
+      - The caller must be the origin office, and the PR must be editable (`_can_origin_edit`).
+      - The file must be PDF/JPG/PNG.
+      - The previous current PR document is superseded automatically.
+      - The function logs `pr_document_uploaded` (payload `{attachment_id, filename, replaced_filename}`).
+  - `supersede_attachment(p_attachment_id uuid, p_reason text) → void` (refuses the current PR document: "Upload a replacement PR document instead")
   - `assign_pr_no(p_pr_id uuid, p_pr_no text) → void`
   - `set_mode_of_procurement(p_pr_id uuid, p_mode text) → void`
   - `complete_pr(p_pr_id uuid, p_remark text default null) → void`
@@ -1947,7 +1917,8 @@ select tests.make_user('pt@x.test', 'TREAS');
 select tests.make_user('pa@x.test', 'GSO', 'admin');
 
 select tests.authenticate_as('pc@x.test');
-select set_config('tests.pr', pr_tracker.create_pr(tests.sample_header(), tests.sample_items())::text, true);
+select set_config('tests.pr', pr_tracker.create_pr(tests.sample_header())::text, true);
+select tests.attach_pr_document(current_setting('tests.pr')::uuid);
 select pr_tracker.forward_pr(current_setting('tests.pr')::uuid, (select id from pr_tracker.offices where code = 'GSO'));
 
 select tests.clear_authentication(); select tests.authenticate_as('pg@x.test');
@@ -2080,12 +2051,14 @@ begin
 end $$;
 
 create or replace function pr_tracker.register_attachment(
-  p_pr_id uuid, p_storage_path text, p_filename text, p_size_bytes bigint, p_mime_type text)
+  p_pr_id uuid, p_storage_path text, p_filename text, p_size_bytes bigint, p_mime_type text,
+  p_is_pr_document boolean default false)
 returns uuid language plpgsql security definer set search_path = '' as $$
 declare
   v_actor pr_tracker.profiles := pr_tracker._actor_with_office();
   v_pr pr_tracker.purchase_requests := pr_tracker._lock_pr(p_pr_id);
   v_max_mb numeric;
+  v_prev pr_tracker.pr_attachments;
   v_id uuid;
   v_event bigint;
 begin
@@ -2103,16 +2076,43 @@ begin
   if p_storage_path is null or p_storage_path not like p_pr_id::text || '/%' then
     raise exception 'Invalid attachment path';
   end if;
+
+  if p_is_pr_document then
+    if v_pr.origin_office_id <> v_actor.office_id or not pr_tracker._can_origin_edit(v_pr) then
+      raise exception 'Only the originating office can upload the PR document, while the PR is in Draft or returned to it';
+    end if;
+    if p_mime_type not in ('application/pdf', 'image/jpeg', 'image/png') then
+      raise exception 'The PR document must be a PDF, JPG or PNG file';
+    end if;
+  end if;
+
   if not exists (select 1 from storage.objects where bucket_id = 'pr-tracker-attachments' and name = p_storage_path) then
     raise exception 'Upload not found. Please upload the file again';
   end if;
 
-  insert into pr_tracker.pr_attachments (pr_id, office_id, uploaded_by, storage_path, filename, size_bytes, mime_type)
-  values (p_pr_id, v_actor.office_id, v_actor.id, p_storage_path, trim(p_filename), p_size_bytes, p_mime_type)
+  if p_is_pr_document then
+    select * into v_prev from pr_tracker.pr_attachments
+     where pr_id = p_pr_id and is_pr_document and superseded_at is null for update;
+    if found then
+      update pr_tracker.pr_attachments
+         set superseded_at = now(), superseded_reason = 'Replaced by a new PR document'
+       where id = v_prev.id;
+    end if;
+  end if;
+
+  insert into pr_tracker.pr_attachments (pr_id, office_id, uploaded_by, storage_path, filename, size_bytes, mime_type, is_pr_document)
+  values (p_pr_id, v_actor.office_id, v_actor.id, p_storage_path, trim(p_filename), p_size_bytes, p_mime_type, coalesce(p_is_pr_document, false))
   returning id into v_id;
-  v_event := pr_tracker._log_event(p_pr_id, 'attachment_added', v_actor,
-    jsonb_build_object('payload', jsonb_build_object('attachment_id', v_id, 'filename', trim(p_filename))));
-  perform pr_tracker._notify(v_event, p_pr_id, 'attachment_added', pr_tracker._followers(p_pr_id), v_actor.office_id);
+
+  if p_is_pr_document then
+    v_event := pr_tracker._log_event(p_pr_id, 'pr_document_uploaded', v_actor, jsonb_build_object('payload',
+      jsonb_build_object('attachment_id', v_id, 'filename', trim(p_filename), 'replaced_filename', v_prev.filename)));
+    perform pr_tracker._notify(v_event, p_pr_id, 'pr_document_uploaded', pr_tracker._followers(p_pr_id), v_actor.office_id);
+  else
+    v_event := pr_tracker._log_event(p_pr_id, 'attachment_added', v_actor,
+      jsonb_build_object('payload', jsonb_build_object('attachment_id', v_id, 'filename', trim(p_filename))));
+    perform pr_tracker._notify(v_event, p_pr_id, 'attachment_added', pr_tracker._followers(p_pr_id), v_actor.office_id);
+  end if;
   return v_id;
 end $$;
 
@@ -2129,6 +2129,7 @@ begin
     raise exception 'Only the office that uploaded this file can mark it superseded';
   end if;
   if v_att.superseded_at is not null then raise exception 'This attachment is already superseded'; end if;
+  if v_att.is_pr_document then raise exception 'Upload a replacement PR document instead'; end if;
   if pr_tracker._clean(p_reason) is null then raise exception 'A reason is required'; end if;
   update pr_tracker.pr_attachments set superseded_at = now(), superseded_reason = trim(p_reason) where id = p_attachment_id;
   perform pr_tracker._log_event(v_att.pr_id, 'attachment_superseded', v_actor, jsonb_build_object(
@@ -2236,7 +2237,7 @@ grant execute on function
   pr_tracker.set_status(uuid, uuid, text),
   pr_tracker.add_remark(uuid, text),
   pr_tracker.add_private_note(uuid, text),
-  pr_tracker.register_attachment(uuid, text, text, bigint, text),
+  pr_tracker.register_attachment(uuid, text, text, bigint, text, boolean),
   pr_tracker.supersede_attachment(uuid, text),
   pr_tracker.assign_pr_no(uuid, text),
   pr_tracker.set_mode_of_procurement(uuid, text),
@@ -2268,7 +2269,7 @@ git commit -m "feat(db): status, remarks, private notes, attachments, PR No., mo
 
 **Interfaces:**
 - Produces views (all `security_invoker`, granted select to `authenticated`):
-  - `pr_overview`: `purchase_requests.*` plus `origin_office_code`, `origin_office_name`, `current_office_code`, `current_office_name`, `current_status_label`, `sent_by_office_name`, `total_steps`, `days_here`.
+  - `pr_overview`: `purchase_requests.*` plus `origin_office_code`, `origin_office_name`, `current_office_code`, `current_office_name`, `current_status_label`, `sent_by_office_name`, `total_steps`, `has_pr_document`, `days_here`.
   - `pr_timeline`: `id`, `pr_id`, `event_type`, `created_at`, `actor_name`, `actor_office_name`, `from_office_name`, `to_office_name`, `status_label`, `override_reason`, `remark`, `from_route_step`, `to_route_step`, `route_purpose`, `is_private`, `payload`.
   - `followed_activity`: `id`, `pr_id`, `routing_slip_no`, `purpose`, `event_type`, `created_at`, `actor_name`, `actor_office_name`.
   - `my_notifications`: `id`, `pr_id`, `routing_slip_no`, `purpose`, `type`, `created_at`, `actor_name`, `actor_office_name`, `to_office_name`, `is_read`.
@@ -2292,7 +2293,8 @@ select tests.make_user('vt@x.test', 'TREAS');
 select tests.make_user('va@x.test', 'ACCTG', 'admin');
 
 select tests.authenticate_as('vc@x.test');
-select set_config('tests.pr', pr_tracker.create_pr(tests.sample_header(), tests.sample_items())::text, true);
+select set_config('tests.pr', pr_tracker.create_pr(tests.sample_header())::text, true);
+select tests.attach_pr_document(current_setting('tests.pr')::uuid);
 select pr_tracker.add_private_note(current_setting('tests.pr')::uuid, 'CSWD-only note');
 select pr_tracker.forward_pr(current_setting('tests.pr')::uuid, (select id from pr_tracker.offices where code = 'GSO'));
 
@@ -2311,7 +2313,7 @@ select is(pr_tracker.unread_notification_count(), 0, 'mark all read');
 -- uninvolved office sees nothing via REST tables, but tracking lookup works without pr_id
 select tests.clear_authentication(); select tests.authenticate_as('vt@x.test');
 select is((select count(*)::int from pr_tracker.purchase_requests where id = current_setting('tests.pr')::uuid), 0, 'TREAS cannot read PR');
-select is((select count(*)::int from pr_tracker.pr_line_items where pr_id = current_setting('tests.pr')::uuid), 0, 'TREAS cannot read items');
+select is((select count(*)::int from pr_tracker.pr_attachments where pr_id = current_setting('tests.pr')::uuid), 0, 'TREAS cannot read attachments');
 select is((select count(*)::int from pr_tracker.pr_events where pr_id = current_setting('tests.pr')::uuid), 0, 'TREAS cannot read events');
 select is(pr_tracker.tracking_lookup('RS-1999-01-00000'), null, 'unknown RS returns null');
 select tests.clear_authentication();
@@ -2358,6 +2360,8 @@ select p.*,
        s.label as current_status_label,
        so.name as sent_by_office_name,
        (select count(*) from pr_tracker.default_route_steps)::int as total_steps,
+       exists (select 1 from pr_tracker.pr_attachments a
+                where a.pr_id = p.id and a.is_pr_document and a.superseded_at is null) as has_pr_document,
        round((extract(epoch from (now() - p.current_since)) / 86400.0)::numeric, 1) as days_here
 from pr_tracker.purchase_requests p
 join pr_tracker.offices oo on oo.id = p.origin_office_id
@@ -2789,16 +2793,17 @@ git commit -m "feat(db): admin RPCs for users, offices, route, statuses, setting
   - Policies `pr_tracker_attachments_select` and `pr_tracker_attachments_insert` on `storage.objects`.
 - Upload object path: `{pr_id}/{uuid}-{safe_filename}`.
 
-- [ ] **Step 1: Write the failing test** `supabase/tests/11_storage.test.sql`
+- [ ] **Step 1: Write the failing test** (Review Focus #5) `supabase/tests/11_storage.test.sql`
 
 ```sql
 begin;
-select plan(6);
+select plan(11);
 
 select tests.make_user('sc@x.test', 'CSWD');
 select tests.make_user('st2@x.test', 'TREAS');
+select tests.make_user('sg@x.test', 'GSO');
 select tests.authenticate_as('sc@x.test');
-select set_config('tests.pr', pr_tracker.create_pr(tests.sample_header(), tests.sample_items())::text, true);
+select set_config('tests.pr', pr_tracker.create_pr(tests.sample_header())::text, true);
 
 select ok(exists (select 1 from storage.buckets where id = 'pr-tracker-attachments' and not public), 'private bucket exists');
 select is(pr_tracker.attachment_pr_id(current_setting('tests.pr') || '/abc-file.pdf'), current_setting('tests.pr')::uuid, 'parses pr id');
@@ -2810,6 +2815,36 @@ select tests.clear_authentication();
 select ok(exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects'
                    and policyname = 'pr_tracker_attachments_insert'), 'insert policy exists');
 
+-- PR document rules. Storage objects are inserted directly as postgres to simulate finished uploads.
+insert into storage.objects (bucket_id, name) values
+  ('pr-tracker-attachments', current_setting('tests.pr') || '/v1-pr.pdf'),
+  ('pr-tracker-attachments', current_setting('tests.pr') || '/v2-pr.pdf'),
+  ('pr-tracker-attachments', current_setting('tests.pr') || '/x-pr.docx');
+select tests.authenticate_as('sc@x.test');
+select lives_ok(format('select pr_tracker.register_attachment(%L, %L, %L, 1000, %L, true)', current_setting('tests.pr'),
+                       current_setting('tests.pr') || '/v1-pr.pdf', 'pr.pdf', 'application/pdf'), 'origin uploads PR document');
+select throws_like(format('select pr_tracker.register_attachment(%L, %L, %L, 1000, %L, true)', current_setting('tests.pr'),
+                          current_setting('tests.pr') || '/x-pr.docx', 'pr.docx',
+                          'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+                   'The PR document must be a PDF, JPG or PNG file', 'PR document must be PDF/JPG/PNG');
+select pr_tracker.register_attachment(current_setting('tests.pr')::uuid, current_setting('tests.pr') || '/v2-pr.pdf',
+                                      'pr-v2.pdf', 1000, 'application/pdf', true);
+select is((select count(*)::int from pr_tracker.pr_attachments
+            where pr_id = current_setting('tests.pr')::uuid and is_pr_document and superseded_at is null), 1,
+          'replacement leaves exactly one current PR document');
+select throws_like(format('select pr_tracker.supersede_attachment(%L, %L)',
+                          (select id from pr_tracker.pr_attachments where pr_id = current_setting('tests.pr')::uuid
+                              and is_pr_document and superseded_at is null), 'x'),
+                   'Upload a replacement PR document instead', 'current PR document cannot be superseded alone');
+
+-- once forwarded, nobody can replace it (GSO holds it; origin is locked)
+select pr_tracker.forward_pr(current_setting('tests.pr')::uuid, (select id from pr_tracker.offices where code = 'GSO'));
+select tests.clear_authentication(); select tests.authenticate_as('sg@x.test');
+select pr_tracker.receive_pr(current_setting('tests.pr')::uuid);
+select throws_like(format('select pr_tracker.register_attachment(%L, %L, %L, 1000, %L, true)', current_setting('tests.pr'),
+                          current_setting('tests.pr') || '/v1-pr.pdf', 'hijack.pdf', 'application/pdf'),
+                   'Only the originating office can upload the PR document%', 'holder cannot replace PR document');
+
 select * from finish();
 rollback;
 ```
@@ -2817,7 +2852,7 @@ rollback;
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `supabase test db`
-Expected: FAIL, `private bucket exists` fails and `attachment_pr_id` does not exist.
+Expected: FAIL. `private bucket exists` fails and `attachment_pr_id` does not exist.
 
 - [ ] **Step 3: Write the migration** `supabase/migrations/20261009001100_storage.sql`
 
@@ -2889,12 +2924,9 @@ git commit -m "feat(db): private attachment bucket with involvement-based polici
     - `formatDateTime(iso: string): string`
     - `locationLine(pr: LocationInput, now?: Date): string`
   - `lib/pr/schema.ts`:
-    - `lineItemSchema`, `prFormSchema`, `EMPTY_ITEM`
-    - types `PrFormValues`, `LineItemValues`
-    - `lineTotal(qty, cost): number`
-    - `grandTotal(items): number`
-    - `toRpcPayload(values): { header: Record<string, string | null>; items: LineItemValues[] }`
-  - `lib/pr/permissions.ts`: `PrAction`, `availableActions(pr: PrForActions, actor: ActorForActions): Set<PrAction>`
+    - `prFormSchema`, type `PrFormValues`
+    - `toRpcPayload(values): { header: Record<string, string | number | null> }`
+  - `lib/pr/permissions.ts`: `PrAction` (incl. `upload_pr_document`), `PrForActions` (incl. `has_pr_document`), `availableActions(pr: PrForActions, actor: ActorForActions): Set<PrAction>`
   - `lib/pr/timeline.ts`:
     - `TimelineEvent`, `describeEvent(e: TimelineEvent, totalSteps: number): string`
     - `diffSnapshots(before: Snapshot, after: Snapshot): string[]`
@@ -2905,9 +2937,9 @@ git commit -m "feat(db): private attachment bucket with involvement-based polici
     - `trackUrl(appUrl: string, rs: string): string`
     - `truncate(s: string, n: number): string`
   - `lib/pr/files.ts`:
-    - `ALLOWED_MIME_TYPES`
+    - `ALLOWED_MIME_TYPES`, `PR_DOCUMENT_MIME_TYPES`
     - `safeFileName(name: string): string`
-    - `validateFile(f: {name: string; size: number; type: string}, maxMb: number): string | null`
+    - `validateFile(f: {name: string; size: number; type: string}, maxMb: number, prDocument?: boolean): string | null`
   - `lib/csv.ts`: `toCsv(rows: Record<string, unknown>[], columns: {key: string; header: string}[]): string`
   - `lib/search.ts`:
     - `RS_PATTERN`
@@ -2915,7 +2947,7 @@ git commit -m "feat(db): private attachment bucket with involvement-based polici
     - `parseListParams(sp: Record<string, string | string[] | undefined>): ListParams`
   - `lib/auth/safe-next.ts`: `safeNext(raw: string | null | undefined): string`
 
-- [ ] **Step 1: Write the failing tests** (Review Focus #5 is covered by `lineTotal`)
+- [ ] **Step 1: Write the failing tests** (Review Focus #5 is covered by the amount rules in `prFormSchema` and the forward gating in `availableActions`)
 
 `lib/format.test.ts`:
 ```ts
@@ -2970,42 +3002,32 @@ describe("format", () => {
 `lib/pr/schema.test.ts`:
 ```ts
 import { describe, expect, test } from "vitest";
-import { grandTotal, lineTotal, prFormSchema, toRpcPayload } from "./schema";
+import { prFormSchema, toRpcPayload } from "./schema";
 
 const valid = {
-  pr_date: "2026-10-09", purpose: "Supplies", responsibility_center_code: "", fund_cluster: "01",
-  requested_by_name: "Maria", requested_by_designation: "", approved_by_name: "", approved_by_designation: "",
-  items: [{ stock_no: "", unit: "ream", description: "Bond paper", quantity: 10, unit_cost: 245.5 }],
+  pr_date: "2026-10-09", purpose: "Supplies", amount: 2695, responsibility_center_code: "", fund_cluster: "01",
+  requested_by_name: "Maria", requested_by_designation: "",
 };
 
 describe("pr schema", () => {
-  test("lineTotal rounds half up to centavos like Postgres", () => {
-    expect(lineTotal(1.5, 10.25)).toBe(15.38);
-    expect(lineTotal(3, 0.1)).toBe(0.3);
-    expect(lineTotal(2, 120)).toBe(240);
-  });
-  test("grandTotal sums rounded lines", () => {
-    expect(grandTotal([{ quantity: 10, unit_cost: 245.5 }, { quantity: 2, unit_cost: 120 }])).toBe(2695);
-  });
   test("valid form parses", () => {
     expect(prFormSchema.safeParse(valid).success).toBe(true);
   });
-  test("requires at least one item", () => {
-    const r = prFormSchema.safeParse({ ...valid, items: [] });
-    expect(r.success).toBe(false);
-    expect(r.error?.issues[0].message).toBe("Add at least one line item");
+  test("amount must be greater than zero", () => {
+    const r = prFormSchema.safeParse({ ...valid, amount: 0 });
+    expect(r.error?.issues[0].message).toBe("Amount must be greater than zero");
   });
-  test("rejects zero quantity and negative cost", () => {
-    const r = prFormSchema.safeParse({ ...valid, items: [{ ...valid.items[0], quantity: 0, unit_cost: -1 }] });
-    const msgs = r.error?.issues.map((i) => i.message);
-    expect(msgs).toContain("Quantity must be greater than zero");
-    expect(msgs).toContain("Unit cost cannot be negative");
+  test("amount is required (empty number input gives NaN)", () => {
+    expect(prFormSchema.safeParse({ ...valid, amount: Number.NaN }).success).toBe(false);
   });
-  test("toRpcPayload turns blanks into null", () => {
-    const { header, items } = toRpcPayload(prFormSchema.parse(valid));
+  test("purpose is required", () => {
+    expect(prFormSchema.safeParse({ ...valid, purpose: "  " }).error?.issues[0].message).toBe("Purpose is required");
+  });
+  test("toRpcPayload turns blanks into null and rounds amount to centavos", () => {
+    const { header } = toRpcPayload(prFormSchema.parse({ ...valid, amount: 1234.567 }));
     expect(header.responsibility_center_code).toBeNull();
     expect(header.purpose).toBe("Supplies");
-    expect(items[0]).toEqual({ stock_no: "", unit: "ream", description: "Bond paper", quantity: 10, unit_cost: 245.5 });
+    expect(header.amount).toBe(1234.57);
   });
 });
 ```
@@ -3018,13 +3040,18 @@ import { availableActions } from "./permissions";
 const office = (id: string, flags: Partial<{ can_assign_pr_no: boolean; can_set_mode_of_procurement: boolean; can_complete: boolean }> = {}) =>
   ({ id, can_assign_pr_no: false, can_set_mode_of_procurement: false, can_complete: false, ...flags });
 const staff = (o: ReturnType<typeof office>) => ({ role: "staff" as const, office: o });
-const pr = (p: Partial<{ movement_state: string; origin_office_id: string; current_office_id: string; sent_by_office_id: string | null }>) =>
-  ({ movement_state: "draft", origin_office_id: "cswd", current_office_id: "cswd", sent_by_office_id: null, ...p }) as never;
+const pr = (p: Partial<{ movement_state: string; origin_office_id: string; current_office_id: string; sent_by_office_id: string | null; has_pr_document: boolean }>) =>
+  ({ movement_state: "draft", origin_office_id: "cswd", current_office_id: "cswd", sent_by_office_id: null, has_pr_document: true, ...p }) as never;
 
 describe("availableActions", () => {
-  test("origin in draft can edit, forward, cancel", () => {
+  test("origin in draft can edit, upload PR document, forward, cancel", () => {
     const a = availableActions(pr({}), staff(office("cswd")));
-    expect([...a].sort()).toEqual(["add_attachment", "add_private_note", "add_remark", "cancel", "edit", "forward"]);
+    expect([...a].sort()).toEqual(["add_attachment", "add_private_note", "add_remark", "cancel", "edit", "forward", "upload_pr_document"]);
+  });
+  test("no forward until the PR document is uploaded", () => {
+    const a = availableActions(pr({ has_pr_document: false }), staff(office("cswd")));
+    expect(a.has("forward")).toBe(false);
+    expect(a.has("upload_pr_document")).toBe(true);
   });
   test("destination sees receive only while in transit", () => {
     const a = availableActions(pr({ movement_state: "in_transit", current_office_id: "gso", sent_by_office_id: "cswd" }), staff(office("gso")));
@@ -3046,6 +3073,7 @@ describe("availableActions", () => {
   });
   test("origin edits after return once received back", () => {
     expect(availableActions(pr({ movement_state: "received" }), staff(office("cswd"))).has("edit")).toBe(true);
+    expect(availableActions(pr({ movement_state: "received", current_office_id: "gso" }), staff(office("gso"))).has("upload_pr_document")).toBe(false);
     expect(availableActions(pr({ movement_state: "returned" }), staff(office("cswd"))).has("edit")).toBe(false);
   });
 });
@@ -3074,20 +3102,16 @@ describe("timeline", () => {
     expect(describeEvent({ ...base, event_type: "pr_no_assigned", payload: { old: "A", new: "B" } }, 10)).toBe("PR No. changed from A to B");
     expect(describeEvent({ ...base, event_type: "pr_no_assigned", payload: { old: null, new: "B" } }, 10)).toBe("PR No. B assigned");
   });
-  test("diffSnapshots lists header and item changes", () => {
-    const before = { header: { purpose: "Old", grand_total: 100 }, items: [
-      { line_no: 1, description: "Paper", unit: "ream", quantity: 10, unit_cost: 10, stock_no: null },
-      { line_no: 2, description: "Pen", unit: "box", quantity: 1, unit_cost: 5, stock_no: null } ] };
-    const after = { header: { purpose: "New", grand_total: 120 }, items: [
-      { line_no: 1, description: "Paper", unit: "ream", quantity: 12, unit_cost: 10, stock_no: null },
-      { line_no: 3, description: "Clip", unit: "box", quantity: 1, unit_cost: 2, stock_no: null } ] };
-    expect(diffSnapshots(before, after)).toEqual([
-      'Purpose: "Old" → "New"',
-      'Grand total: "100" → "120"',
-      "Line 1 quantity: 10 → 12",
-      "Line 2 removed: Pen",
-      "Line 3 added: Clip",
-    ]);
+  test("PR document events", () => {
+    expect(describeEvent({ ...base, event_type: "pr_document_uploaded", payload: { filename: "pr.pdf", replaced_filename: null } }, 10))
+      .toBe("PR document uploaded (pr.pdf)");
+    expect(describeEvent({ ...base, event_type: "pr_document_uploaded", payload: { filename: "pr-v2.pdf", replaced_filename: "pr.pdf" } }, 10))
+      .toBe("PR document replaced: pr.pdf → pr-v2.pdf");
+  });
+  test("diffSnapshots lists changed header fields", () => {
+    const before = { header: { purpose: "Old", amount: 100, fund_cluster: null } };
+    const after = { header: { purpose: "New", amount: 120, fund_cluster: null } };
+    expect(diffSnapshots(before, after)).toEqual(['Purpose: "Old" → "New"', 'Amount: "100" → "120"']);
   });
   test("notificationText", () => {
     expect(notificationText({ type: "forwarded", actor_office_name: "CSWD", routing_slip_no: "RS-2026-10-00001" }))
@@ -3135,6 +3159,9 @@ test("validateFile", () => {
   expect(validateFile({ name: "a.exe", size: 1000, type: "application/x-msdownload" }, 20)).toBe("File type not allowed. Use PDF, JPG, PNG, DOCX or XLSX.");
   expect(validateFile({ name: "a.pdf", size: 21 * 1024 * 1024, type: "application/pdf" }, 20)).toBe("File is larger than 20 MB.");
   expect(validateFile({ name: "a.pdf", size: 0, type: "application/pdf" }, 20)).toBe("File is empty.");
+  expect(validateFile({ name: "a.docx", size: 10, type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }, 20, true))
+    .toBe("The PR document must be a PDF, JPG or PNG file.");
+  expect(validateFile({ name: "a.png", size: 10, type: "image/png" }, 20, true)).toBeNull();
 });
 ```
 
@@ -3162,8 +3189,8 @@ test("searchTarget routes RS numbers to tracking page", () => {
 });
 test("parseListParams applies defaults and whitelists", () => {
   expect(parseListParams({})).toEqual({ page: 1, size: 25, sort: "created_at", dir: "desc", q: "", state: "", office: "", from: "", to: "", min: "", max: "" });
-  const p = parseListParams({ page: "3", size: "50", sort: "grand_total.asc", state: "received", q: "paper" });
-  expect(p).toMatchObject({ page: 3, size: 50, sort: "grand_total", dir: "asc", state: "received", q: "paper" });
+  const p = parseListParams({ page: "3", size: "50", sort: "amount.asc", state: "received", q: "paper" });
+  expect(p).toMatchObject({ page: 3, size: 50, sort: "amount", dir: "asc", state: "received", q: "paper" });
   expect(parseListParams({ size: "9999", sort: "password.asc", state: "hacked" })).toMatchObject({ size: 25, sort: "created_at", state: "" });
 });
 ```
@@ -3196,7 +3223,7 @@ export type Role = "super_admin" | "admin" | "staff";
 export type EventType =
   | "created" | "edited" | "forwarded" | "recalled" | "received" | "returned" | "status_changed"
   | "remark_added" | "private_note_added" | "attachment_added" | "attachment_superseded"
-  | "pr_no_assigned" | "mode_set" | "completed" | "cancelled" | "followed" | "unfollowed";
+  | "pr_document_uploaded" | "pr_no_assigned" | "mode_set" | "completed" | "cancelled" | "followed" | "unfollowed";
 
 export type OfficeRef = {
   id: string; code: string; name: string;
@@ -3279,40 +3306,17 @@ export function locationLine(pr: LocationInput, now: Date = new Date()): string 
 ```ts
 import { z } from "zod";
 
-export const lineItemSchema = z.object({
-  stock_no: z.string().trim(),
-  unit: z.string().trim().min(1, "Unit is required"),
-  description: z.string().trim().min(1, "Description is required"),
-  quantity: z.number("Quantity is required").positive("Quantity must be greater than zero"),
-  unit_cost: z.number("Unit cost is required").min(0, "Unit cost cannot be negative"),
-});
-
 export const prFormSchema = z.object({
   pr_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date is required"),
   purpose: z.string().trim().min(1, "Purpose is required"),
+  amount: z.number("Amount is required").positive("Amount must be greater than zero"),
   responsibility_center_code: z.string().trim(),
   fund_cluster: z.string().trim(),
   requested_by_name: z.string().trim().min(1, "Requested by is required"),
   requested_by_designation: z.string().trim(),
-  approved_by_name: z.string().trim(),
-  approved_by_designation: z.string().trim(),
-  items: z.array(lineItemSchema).min(1, "Add at least one line item"),
 });
 
 export type PrFormValues = z.infer<typeof prFormSchema>;
-export type LineItemValues = z.infer<typeof lineItemSchema>;
-
-export const EMPTY_ITEM: LineItemValues = { stock_no: "", unit: "", description: "", quantity: 1, unit_cost: 0 };
-
-/** Mirrors Postgres round(qty * cost, 2): half away from zero (all values are non-negative). */
-export function lineTotal(quantity: number, unitCost: number): number {
-  return Math.round((quantity * unitCost + Number.EPSILON) * 100) / 100;
-}
-
-export function grandTotal(items: { quantity: number; unit_cost: number }[]): number {
-  const cents = items.reduce((sum, i) => sum + Math.round(lineTotal(i.quantity || 0, i.unit_cost || 0) * 100), 0);
-  return cents / 100;
-}
 
 const blankToNull = (s: string) => (s.trim() === "" ? null : s.trim());
 
@@ -3321,16 +3325,12 @@ export function toRpcPayload(values: PrFormValues) {
     header: {
       pr_date: values.pr_date,
       purpose: values.purpose,
+      amount: Math.round((values.amount + Number.EPSILON) * 100) / 100,
       responsibility_center_code: blankToNull(values.responsibility_center_code),
       fund_cluster: blankToNull(values.fund_cluster),
       requested_by_name: values.requested_by_name,
       requested_by_designation: blankToNull(values.requested_by_designation),
-      approved_by_name: blankToNull(values.approved_by_name),
-      approved_by_designation: blankToNull(values.approved_by_designation),
-    } as Record<string, string | null>,
-    items: values.items.map(({ stock_no, unit, description, quantity, unit_cost }) => ({
-      stock_no, unit, description, quantity, unit_cost,
-    })),
+    } as Record<string, string | number | null>,
   };
 }
 ```
@@ -3340,7 +3340,7 @@ export function toRpcPayload(values: PrFormValues) {
 import type { MovementState, Role } from "../types";
 
 export type PrAction =
-  | "edit" | "forward" | "receive" | "return" | "recall" | "set_status" | "add_remark"
+  | "edit" | "upload_pr_document" | "forward" | "receive" | "return" | "recall" | "set_status" | "add_remark"
   | "add_private_note" | "add_attachment" | "assign_pr_no" | "set_mode" | "complete" | "cancel";
 
 export type PrForActions = {
@@ -3348,6 +3348,7 @@ export type PrForActions = {
   origin_office_id: string;
   current_office_id: string;
   sent_by_office_id: string | null;
+  has_pr_document: boolean;
 };
 
 export type ActorForActions = {
@@ -3369,8 +3370,8 @@ export function availableActions(pr: PrForActions, actor: ActorForActions): Set<
   const holds = receivedHere || draftHere;
   const pending = pr.movement_state === "in_transit" || pr.movement_state === "returned";
 
-  if (draftHere || (receivedHere && isOrigin)) { a.add("edit"); a.add("cancel"); }
-  if (holds) { a.add("forward"); a.add("add_private_note"); }
+  if (draftHere || (receivedHere && isOrigin)) { a.add("edit"); a.add("upload_pr_document"); a.add("cancel"); }
+  if (holds) { a.add("add_private_note"); if (pr.has_pr_document) a.add("forward"); }
   if (holds || isOrigin) { a.add("add_remark"); a.add("add_attachment"); }
   if (pending && pr.current_office_id === office.id) a.add("receive");
   if (pending && pr.sent_by_office_id === office.id) a.add("recall");
@@ -3425,6 +3426,10 @@ export function describeEvent(e: TimelineEvent, totalSteps: number): string {
     case "private_note_added": return "Private note added";
     case "attachment_added": return `Attached ${str(e.payload.filename)}`;
     case "attachment_superseded": return `Marked ${str(e.payload.filename)} as superseded. Reason: ${str(e.remark)}`;
+    case "pr_document_uploaded":
+      return e.payload.replaced_filename
+        ? `PR document replaced: ${str(e.payload.replaced_filename)} → ${str(e.payload.filename)}`
+        : `PR document uploaded (${str(e.payload.filename)})`;
     case "pr_no_assigned":
       return e.payload.old ? `PR No. changed from ${str(e.payload.old)} to ${str(e.payload.new)}` : `PR No. ${str(e.payload.new)} assigned`;
     case "mode_set": return `Mode of procurement set to ${str(e.payload.new)}`;
@@ -3435,17 +3440,11 @@ export function describeEvent(e: TimelineEvent, totalSteps: number): string {
   }
 }
 
-type SnapItem = { line_no: number; stock_no: string | null; unit: string; description: string; quantity: number; unit_cost: number };
-export type Snapshot = { header: Record<string, unknown>; items: SnapItem[] };
+export type Snapshot = { header: Record<string, unknown> };
 
 const HEADER_LABELS: Record<string, string> = {
-  pr_date: "Date", purpose: "Purpose", responsibility_center_code: "Responsibility center code",
+  pr_date: "Date", purpose: "Purpose", amount: "Amount", responsibility_center_code: "Responsibility center code",
   fund_cluster: "Fund cluster", requested_by_name: "Requested by", requested_by_designation: "Requested by designation",
-  approved_by_name: "Approved by", approved_by_designation: "Approved by designation", grand_total: "Grand total",
-};
-const ITEM_FIELDS: (keyof SnapItem)[] = ["stock_no", "unit", "description", "quantity", "unit_cost"];
-const ITEM_LABELS: Record<string, string> = {
-  stock_no: "stock no.", unit: "unit", description: "description", quantity: "quantity", unit_cost: "unit cost",
 };
 
 export function diffSnapshots(before: Snapshot, after: Snapshot): string[] {
@@ -3454,16 +3453,6 @@ export function diffSnapshots(before: Snapshot, after: Snapshot): string[] {
     const a = str(before.header[key]);
     const b = str(after.header[key]);
     if (a !== b) out.push(`${HEADER_LABELS[key]}: "${a}" → "${b}"`);
-  }
-  const lines = [...new Set([...before.items, ...after.items].map((i) => i.line_no))].sort((x, y) => x - y);
-  for (const n of lines) {
-    const a = before.items.find((i) => i.line_no === n);
-    const b = after.items.find((i) => i.line_no === n);
-    if (!a && b) { out.push(`Line ${n} added: ${b.description}`); continue; }
-    if (a && !b) { out.push(`Line ${n} removed: ${a.description}`); continue; }
-    for (const f of ITEM_FIELDS) {
-      if (str(a![f]) !== str(b![f])) out.push(`Line ${n} ${ITEM_LABELS[f]}: ${str(a![f])} → ${str(b![f])}`);
-    }
   }
   return out;
 }
@@ -3481,6 +3470,7 @@ export function notificationText(n: NotificationRow): string {
     case "status_changed": return `${who} updated the status of ${rs}`;
     case "remark_added": return `${who} added a remark on ${rs}`;
     case "attachment_added": return `${who} attached a file to ${rs}`;
+    case "pr_document_uploaded": return `${who} uploaded a new PR document for ${rs}`;
     case "completed": return `${rs} was completed`;
     case "cancelled": return `${rs} was cancelled`;
     default: return `${rs} was updated`;
@@ -3518,6 +3508,8 @@ export const ALLOWED_MIME_TYPES = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ] as const;
 
+export const PR_DOCUMENT_MIME_TYPES = ["application/pdf", "image/jpeg", "image/png"] as const;
+
 export function safeFileName(name: string): string {
   // Drop directory parts (including "." / ".." segments) so paths cannot be smuggled in.
   const base = name.split(/[\\/]/).filter((p) => p && !/^\.+$/.test(p)).join("_");
@@ -3527,7 +3519,8 @@ export function safeFileName(name: string): string {
   return `${(stem || "file").slice(0, 100 - ext.length)}${ext}`;
 }
 
-export function validateFile(f: { name: string; size: number; type: string }, maxMb: number): string | null {
+export function validateFile(f: { name: string; size: number; type: string }, maxMb: number, prDocument = false): string | null {
+  if (prDocument && !(PR_DOCUMENT_MIME_TYPES as readonly string[]).includes(f.type)) return "The PR document must be a PDF, JPG or PNG file.";
   if (!(ALLOWED_MIME_TYPES as readonly string[]).includes(f.type)) return "File type not allowed. Use PDF, JPG, PNG, DOCX or XLSX.";
   if (f.size <= 0) return "File is empty.";
   if (f.size > maxMb * 1024 * 1024) return `File is larger than ${maxMb} MB.`;
@@ -3561,7 +3554,7 @@ export function searchTarget(q: string): string | null {
   return `/prs?q=${encodeURIComponent(t)}`;
 }
 
-const SORTABLE = ["created_at", "routing_slip_no", "pr_no", "grand_total", "pr_date", "days_here", "current_since"] as const;
+const SORTABLE = ["created_at", "routing_slip_no", "pr_no", "amount", "pr_date", "days_here", "current_since"] as const;
 const STATES = ["draft", "in_transit", "received", "returned", "completed", "cancelled"];
 const SIZES = [10, 25, 50, 100];
 
@@ -3613,7 +3606,7 @@ Expected: all 9 test files pass. If `formatPeso` prints `PHP 2,695.00` on your N
 
 ```bash
 git add lib
-git commit -m "feat(lib): domain types, formatting, PR schema, permissions, timeline text, files, csv, search"
+git commit -m "feat(lib): domain types, formatting, PR header schema, permissions, timeline text, files, csv, search"
 ```
 
 ---
@@ -4536,23 +4529,31 @@ git commit -m "feat(ui): design tokens, dark sidebar app shell, top bar with glo
 
 ---
 
-### Task 17: PR create and edit form
+### Task 17: PR registration form (header and PR document upload)
 
 **Files:**
 - Create:
   - `lib/supabase/rows.ts`
+  - `lib/pr/upload-client.ts`
   - `components/pr/pr-form.tsx`
   - `app/(app)/prs/actions.ts`
   - `app/(app)/prs/new/page.tsx`
   - `app/(app)/prs/[id]/edit/page.tsx`
 
 **Interfaces:**
-- Consumes: `prFormSchema`, `grandTotal`, `lineTotal`, `toRpcPayload` (Task 13); `ConfirmActionDialog`, `rpcAction` (Task 15); `create_pr`, `update_pr_content` (Task 7).
+- Consumes:
+  - `prFormSchema`, `toRpcPayload`, `validateFile`, `safeFileName` (Task 13)
+  - `ConfirmActionDialog`, `rpcAction` (Task 15)
+  - `create_pr`, `update_pr_content` (Task 7)
+  - `register_attachment` (Task 9)
 - Produces:
-  - Row types `PrOverviewRow`, `TimelineRow`, `NotificationViewRow`, `LineItemRow`, `OfficeRow`, `ProfileRow`, `OfficeStatusRow`, `RouteStepRow`
+  - Row types `PrOverviewRow`, `TimelineRow`, `NotificationViewRow`, `FollowedActivityRow`, `AttachmentRow`, `OfficeRow`, `ProfileRow`, `OfficeStatusRow`, `RouteStepRow`
   - `createPr(values: PrFormValues): Promise<ActionResult<string>>`
   - `updatePr(prId: string, values: PrFormValues): Promise<ActionResult<null>>`
-  - `<PrForm mode prId? defaultValues />` (uses `EMPTY_ITEM` from `lib/pr/schema.ts`)
+  - `registerAttachment(prId, path, filename, size, mime, isPrDocument): Promise<ActionResult<string>>`
+  - `getAttachmentUrl(attachmentId): Promise<ActionResult<string>>`
+  - `uploadAttachment(prId: string, file: File, maxMb: number, isPrDocument: boolean): Promise<ActionResult<string>>` (browser-side: it uploads to Storage, then registers the file)
+  - `<PrForm mode prId? defaultValues maxMb currentDocumentName? />`
 
 - [ ] **Step 1: Write `lib/supabase/rows.ts`**
 
@@ -4564,7 +4565,7 @@ export type PrOverviewRow = S["Views"]["pr_overview"]["Row"];
 export type TimelineRow = S["Views"]["pr_timeline"]["Row"];
 export type NotificationViewRow = S["Views"]["my_notifications"]["Row"];
 export type FollowedActivityRow = S["Views"]["followed_activity"]["Row"];
-export type LineItemRow = S["Tables"]["pr_line_items"]["Row"];
+export type AttachmentRow = S["Tables"]["pr_attachments"]["Row"];
 export type OfficeRow = S["Tables"]["offices"]["Row"];
 export type ProfileRow = S["Tables"]["profiles"]["Row"];
 export type OfficeStatusRow = S["Tables"]["office_statuses"]["Row"];
@@ -4575,124 +4576,167 @@ export type RouteStepRow = S["Tables"]["default_route_steps"]["Row"];
 
 ```ts
 "use server";
+import { createClient } from "@/lib/supabase/server";
 import { prFormSchema, toRpcPayload, type PrFormValues } from "@/lib/pr/schema";
 import { rpcAction, type ActionResult } from "@/lib/actions/rpc";
 
 export async function createPr(values: PrFormValues): Promise<ActionResult<string>> {
   const parsed = prFormSchema.safeParse(values);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid form" };
-  const { header, items } = toRpcPayload(parsed.data);
-  return rpcAction<string>("create_pr", { p_header: header, p_items: items }, ["/", "/prs"]);
+  return rpcAction<string>("create_pr", { p_header: toRpcPayload(parsed.data).header }, ["/", "/prs"]);
 }
 
 export async function updatePr(prId: string, values: PrFormValues): Promise<ActionResult<null>> {
   const parsed = prFormSchema.safeParse(values);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid form" };
-  const { header, items } = toRpcPayload(parsed.data);
-  return rpcAction("update_pr_content", { p_pr_id: prId, p_header: header, p_items: items }, [`/prs/${prId}`, "/prs"]);
+  return rpcAction("update_pr_content", { p_pr_id: prId, p_header: toRpcPayload(parsed.data).header }, [`/prs/${prId}`, "/prs"]);
+}
+
+export async function registerAttachment(
+  prId: string, path: string, filename: string, size: number, mime: string, isPrDocument: boolean,
+): Promise<ActionResult<string>> {
+  return rpcAction<string>("register_attachment", {
+    p_pr_id: prId, p_storage_path: path, p_filename: filename, p_size_bytes: size, p_mime_type: mime,
+    p_is_pr_document: isPrDocument,
+  }, [`/prs/${prId}`, "/"]);
+}
+
+export async function getAttachmentUrl(attachmentId: string): Promise<ActionResult<string>> {
+  const supabase = await createClient();
+  const { data: att } = await supabase.from("pr_attachments").select("storage_path, filename").eq("id", attachmentId).maybeSingle();
+  if (!att) return { ok: false, error: "Attachment not found" };
+  const { data, error } = await supabase.storage.from("pr-tracker-attachments").createSignedUrl(att.storage_path, 60);
+  if (error || !data) return { ok: false, error: error?.message ?? "Could not create link" };
+  return { ok: true, data: data.signedUrl };
 }
 ```
 
-- [ ] **Step 3: Write `components/pr/pr-form.tsx`**
+- [ ] **Step 3: Write `lib/pr/upload-client.ts`**
+
+```ts
+import { createBrowserSupabase } from "@/lib/supabase/client";
+import type { ActionResult } from "@/lib/actions/rpc";
+import { registerAttachment } from "@/app/(app)/prs/actions";
+import { safeFileName, validateFile } from "./files";
+
+/** Browser-only: uploads to Storage, then records the file through the register_attachment RPC. */
+export async function uploadAttachment(prId: string, file: File, maxMb: number, isPrDocument: boolean): Promise<ActionResult<string>> {
+  const problem = validateFile(file, maxMb, isPrDocument);
+  if (problem) return { ok: false, error: problem };
+  const path = `${prId}/${crypto.randomUUID()}-${safeFileName(file.name)}`;
+  const { error } = await createBrowserSupabase().storage
+    .from("pr-tracker-attachments").upload(path, file, { contentType: file.type, upsert: false });
+  if (error) return { ok: false, error: `Upload failed: ${error.message}` };
+  return registerAttachment(prId, path, file.name, file.size, file.type, isPrDocument);
+}
+```
+
+- [ ] **Step 4: Write `components/pr/pr-form.tsx`**
 
 ```tsx
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useFieldArray, useForm } from "react-hook-form";
+import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
+import type { ActionResult } from "@/lib/actions/rpc";
 import { formatPeso } from "@/lib/format";
-import { EMPTY_ITEM, grandTotal, lineTotal, prFormSchema, type PrFormValues } from "@/lib/pr/schema";
+import { validateFile } from "@/lib/pr/files";
+import { prFormSchema, type PrFormValues } from "@/lib/pr/schema";
+import { uploadAttachment } from "@/lib/pr/upload-client";
 import { createPr, updatePr } from "@/app/(app)/prs/actions";
 
-const HEADER_FIELDS: { name: keyof PrFormValues; label: string; type?: string }[] = [
+const TEXT_FIELDS: { name: keyof PrFormValues; label: string; type?: string }[] = [
   { name: "pr_date", label: "Date", type: "date" },
-  { name: "responsibility_center_code", label: "Responsibility Center Code" },
-  { name: "fund_cluster", label: "Fund Cluster" },
   { name: "requested_by_name", label: "Requested by (name)" },
   { name: "requested_by_designation", label: "Requested by (designation)" },
-  { name: "approved_by_name", label: "Approved by (name)" },
-  { name: "approved_by_designation", label: "Approved by (designation)" },
+  { name: "responsibility_center_code", label: "Responsibility Center Code (optional)" },
+  { name: "fund_cluster", label: "Fund Cluster (optional)" },
 ];
 
-export function PrForm({ mode, prId, defaultValues }: { mode: "create" | "edit"; prId?: string; defaultValues: PrFormValues }) {
+export function PrForm({ mode, prId, defaultValues, maxMb, currentDocumentName }: {
+  mode: "create" | "edit"; prId?: string; defaultValues: PrFormValues; maxMb: number; currentDocumentName?: string | null;
+}) {
   const router = useRouter();
   const [pending, setPending] = useState<PrFormValues | null>(null);
-  const { register, control, handleSubmit, watch, formState: { errors } } = useForm<PrFormValues>({
+  const [file, setFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const { register, handleSubmit, formState: { errors } } = useForm<PrFormValues>({
     resolver: zodResolver(prFormSchema),
     defaultValues,
   });
-  const { fields, append, remove } = useFieldArray({ control, name: "items" });
-  const items = watch("items");
-  const total = grandTotal(items.map((i) => ({ quantity: Number(i.quantity) || 0, unit_cost: Number(i.unit_cost) || 0 })));
+
+  function onValid(values: PrFormValues) {
+    if (mode === "create" && !file) return setFileError("Attach the signed PR document.");
+    if (file) {
+      const problem = validateFile(file, maxMb, true);
+      if (problem) return setFileError(problem);
+    }
+    setFileError(null);
+    setPending(values);
+  }
+
+  async function submit(): Promise<ActionResult<string>> {
+    const values = pending!;
+    if (mode === "create") {
+      const created = await createPr(values);
+      if (!created.ok) return created;
+      const up = await uploadAttachment(created.data, file!, maxMb, true);
+      if (!up.ok) toast.error(`PR created, but the PR document upload failed: ${up.error} Upload it from the PR page.`);
+      return { ok: true, data: created.data };
+    }
+    const updated = await updatePr(prId!, values);
+    if (!updated.ok) return updated;
+    if (file) {
+      const up = await uploadAttachment(prId!, file, maxMb, true);
+      if (!up.ok) return up;
+    }
+    return { ok: true, data: prId! };
+  }
 
   return (
     <>
-      <form onSubmit={handleSubmit((v) => setPending(v))} className="space-y-6">
+      <form onSubmit={handleSubmit(onValid)} className="space-y-6">
         <Card>
           <CardHeader><CardTitle>Purchase Request</CardTitle></CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
-            {HEADER_FIELDS.map((f) => (
+            <div className="space-y-1.5 md:col-span-2">
+              <Label htmlFor="purpose">Purpose</Label>
+              <Textarea id="purpose" rows={2} {...register("purpose")} />
+              {errors.purpose && <p className="text-xs text-destructive">{errors.purpose.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="amount">Amount (₱)</Label>
+              <Input id="amount" type="number" step="0.01" min="0" {...register("amount", { valueAsNumber: true })} />
+              {errors.amount && <p className="text-xs text-destructive">{errors.amount.message}</p>}
+            </div>
+            {TEXT_FIELDS.map((f) => (
               <div key={f.name} className="space-y-1.5">
                 <Label htmlFor={f.name}>{f.label}</Label>
                 <Input id={f.name} type={f.type ?? "text"} {...register(f.name)} />
                 {errors[f.name] && <p className="text-xs text-destructive">{String(errors[f.name]?.message)}</p>}
               </div>
             ))}
-            <div className="space-y-1.5 md:col-span-2">
-              <Label htmlFor="purpose">Purpose</Label>
-              <Textarea id="purpose" rows={2} {...register("purpose")} />
-              {errors.purpose && <p className="text-xs text-destructive">{errors.purpose.message}</p>}
-            </div>
           </CardContent>
         </Card>
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Line items</CardTitle>
-            <Button type="button" variant="outline" size="sm" onClick={() => append(EMPTY_ITEM)}><Plus className="mr-1 size-4" />Add line</Button>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {errors.items?.root && <p className="text-sm text-destructive">{errors.items.root.message}</p>}
-            {errors.items?.message && <p className="text-sm text-destructive">{errors.items.message}</p>}
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-sm">
-                <thead className="text-left text-muted-foreground">
-                  <tr><th className="w-10 p-1">#</th><th className="w-28 p-1">Stock/Prop. No.</th><th className="w-24 p-1">Unit</th>
-                      <th className="p-1">Item description</th><th className="w-24 p-1">Qty</th><th className="w-32 p-1">Unit cost</th>
-                      <th className="w-32 p-1 text-right">Total</th><th className="w-10 p-1" /></tr>
-                </thead>
-                <tbody>
-                  {fields.map((field, i) => (
-                    <tr key={field.id} className="align-top">
-                      <td className="p-1 pt-3">{i + 1}</td>
-                      <td className="p-1"><Input aria-label={`Line ${i + 1} stock no`} {...register(`items.${i}.stock_no`)} /></td>
-                      <td className="p-1"><Input aria-label={`Line ${i + 1} unit`} {...register(`items.${i}.unit`)} /></td>
-                      <td className="p-1"><Input aria-label={`Line ${i + 1} description`} {...register(`items.${i}.description`)} /></td>
-                      <td className="p-1"><Input aria-label={`Line ${i + 1} quantity`} type="number" step="0.01" min="0" {...register(`items.${i}.quantity`, { valueAsNumber: true })} /></td>
-                      <td className="p-1"><Input aria-label={`Line ${i + 1} unit cost`} type="number" step="0.01" min="0" {...register(`items.${i}.unit_cost`, { valueAsNumber: true })} /></td>
-                      <td className="p-1 pt-3 text-right tabular-nums">{formatPeso(lineTotal(Number(items[i]?.quantity) || 0, Number(items[i]?.unit_cost) || 0))}</td>
-                      <td className="p-1"><Button type="button" variant="ghost" size="icon" aria-label={`Remove line ${i + 1}`} onClick={() => remove(i)} disabled={fields.length === 1}><Trash2 className="size-4" /></Button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {errors.items && Array.isArray(errors.items) && (
-              <ul className="text-xs text-destructive">
-                {errors.items.map((e, i) => e && Object.values(e).map((fe) => (
-                  <li key={`${i}-${String((fe as { message?: string })?.message)}`}>Line {i + 1}: {(fe as { message?: string })?.message}</li>
-                )))}
-              </ul>
+          <CardHeader><CardTitle>Signed PR document</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            {mode === "edit" && currentDocumentName && (
+              <p className="text-sm text-muted-foreground">Current file: <span className="font-medium text-foreground">{currentDocumentName}</span>. Choose a file only if you want to replace it.</p>
             )}
-            <div className="flex justify-end text-base font-semibold">Grand total: <span className="ml-2 tabular-nums">{formatPeso(total)}</span></div>
+            <Label htmlFor="pr-document">PDF, JPG or PNG, up to {maxMb} MB</Label>
+            <Input id="pr-document" type="file" accept=".pdf,.jpg,.jpeg,.png"
+                   onChange={(e) => { setFile(e.target.files?.[0] ?? null); setFileError(null); }} />
+            {fileError && <p className="text-sm text-destructive">{fileError}</p>}
           </CardContent>
         </Card>
 
@@ -4702,44 +4746,49 @@ export function PrForm({ mode, prId, defaultValues }: { mode: "create" | "edit";
         </div>
       </form>
 
-      <ConfirmActionDialog<string | null>
+      <ConfirmActionDialog<string>
         open={pending !== null}
         onOpenChange={(o) => !o && setPending(null)}
         title={mode === "create" ? "Create this purchase request?" : "Save changes to this purchase request?"}
         description={
-          <p>{pending?.items.length ?? 0} line item(s) totalling <b>{formatPeso(total)}</b>.{" "}
-            {mode === "create" ? "It will be saved as a Draft at your office. You can forward it afterwards." : "The change is recorded in the audit trail."}</p>
+          <p>
+            Amount <b>{formatPeso(pending?.amount ?? 0)}</b>.{" "}
+            {file && <>The file <b>{file.name}</b> will be {mode === "create" ? "uploaded as" : "uploaded to replace"} the PR document.{" "}</>}
+            {mode === "create" ? "It will be saved as a Draft at your office. You can forward it afterwards." : "The change is recorded in the audit trail."}
+          </p>
         }
         confirmLabel={mode === "create" ? "Create PR" : "Save changes"}
         successMessage={mode === "create" ? "Purchase request created" : "Changes saved"}
-        onConfirm={() => (mode === "create" ? createPr(pending!) : updatePr(prId!, pending!))}
-        onSuccess={(id) => router.push(`/prs/${mode === "create" ? id : prId}`)}
+        onConfirm={submit}
+        onSuccess={(id) => router.push(`/prs/${id}`)}
       />
     </>
   );
 }
 ```
 
-- [ ] **Step 4: Write the pages**
+- [ ] **Step 5: Write the pages**
 
 `app/(app)/prs/new/page.tsx`:
 ```tsx
 import { requireProfile } from "@/lib/auth/profile";
+import { createClient } from "@/lib/supabase/server";
 import { PrForm } from "@/components/pr/pr-form";
-import { EMPTY_ITEM } from "@/lib/pr/schema";
 
 export default async function NewPrPage() {
   const profile = await requireProfile();
   if (!profile.office) return <p className="text-muted-foreground">Your account is not assigned to an office, so it cannot create PRs.</p>;
+  const supabase = await createClient();
+  const { data: maxMb } = await supabase.from("app_settings").select("value").eq("key", "max_upload_mb").maybeSingle();
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(new Date());
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold">New Purchase Request</h1>
       <p className="text-sm text-muted-foreground">Office/Section: {profile.office.name}</p>
-      <PrForm mode="create" defaultValues={{
-        pr_date: today, purpose: "", responsibility_center_code: "", fund_cluster: "",
+      <PrForm mode="create" maxMb={Number(maxMb?.value ?? 20)} defaultValues={{
+        pr_date: today, purpose: "", amount: undefined as unknown as number,
+        responsibility_center_code: "", fund_cluster: "",
         requested_by_name: profile.full_name, requested_by_designation: profile.designation ?? "",
-        approved_by_name: "", approved_by_designation: "", items: [EMPTY_ITEM],
       }} />
     </div>
   );
@@ -4759,63 +4808,66 @@ export default async function EditPrPage({ params }: { params: Promise<{ id: str
   const { id } = await params;
   const profile = await requireProfile();
   const supabase = await createClient();
-  const [{ data: pr }, { data: items }] = await Promise.all([
-    supabase.from("purchase_requests").select("*").eq("id", id).maybeSingle(),
-    supabase.from("pr_line_items").select("*").eq("pr_id", id).order("line_no"),
+  const [{ data: pr }, { data: doc }, { data: maxMb }] = await Promise.all([
+    supabase.from("pr_overview").select("*").eq("id", id).maybeSingle(),
+    supabase.from("pr_attachments").select("filename").eq("pr_id", id).eq("is_pr_document", true).is("superseded_at", null).maybeSingle(),
+    supabase.from("app_settings").select("value").eq("key", "max_upload_mb").maybeSingle(),
   ]);
   if (!pr) notFound();
-  const actions = availableActions({ ...pr, movement_state: pr.movement_state as MovementState }, profile);
+  const actions = availableActions({
+    movement_state: pr.movement_state as MovementState, origin_office_id: pr.origin_office_id!,
+    current_office_id: pr.current_office_id!, sent_by_office_id: pr.sent_by_office_id, has_pr_document: !!pr.has_pr_document,
+  }, profile);
   if (!actions.has("edit")) redirect(`/prs/${id}`);
 
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold">Edit {pr.routing_slip_no}</h1>
-      <PrForm mode="edit" prId={id} defaultValues={{
-        pr_date: pr.pr_date, purpose: pr.purpose,
+      <PrForm mode="edit" prId={id} maxMb={Number(maxMb?.value ?? 20)} currentDocumentName={doc?.filename ?? null} defaultValues={{
+        pr_date: pr.pr_date!, purpose: pr.purpose!, amount: Number(pr.amount),
         responsibility_center_code: pr.responsibility_center_code ?? "", fund_cluster: pr.fund_cluster ?? "",
-        requested_by_name: pr.requested_by_name, requested_by_designation: pr.requested_by_designation ?? "",
-        approved_by_name: pr.approved_by_name ?? "", approved_by_designation: pr.approved_by_designation ?? "",
-        items: (items ?? []).map((i) => ({ stock_no: i.stock_no ?? "", unit: i.unit, description: i.description,
-          quantity: Number(i.quantity), unit_cost: Number(i.unit_cost) })),
+        requested_by_name: pr.requested_by_name!, requested_by_designation: pr.requested_by_designation ?? "",
       }} />
     </div>
   );
 }
 ```
 
-- [ ] **Step 5: Verify manually**
+- [ ] **Step 6: Verify manually**
 
 Run: `pnpm dev`. Dev sign in as `cswd@test.local`, open `/prs/new`, then:
-1. Remove the description. Click **Create PR**. Expected: an inline error, and no modal opens.
-2. Fill the form with two lines and click **Create PR**. Expected: the confirmation modal shows the line count and the total. Confirm. Expected: you are routed to `/prs/<id>`. That page 404s until Task 18, which is fine.
-3. In Studio, `select routing_slip_no, grand_total from pr_tracker.purchase_requests` shows the new row.
+1. Leave Amount empty and click **Create PR**. Expected: an inline error, and no modal opens.
+2. Fill the fields but choose no file, then click **Create PR**. Expected: "Attach the signed PR document." appears.
+3. Choose a `.docx`. Expected: "The PR document must be a PDF, JPG or PNG file."
+4. Choose a PDF and click **Create PR**. Expected: the modal names the file and the amount. Confirm. Expected: you are routed to `/prs/<id>`. That page 404s until Task 18, which is fine.
+5. In Studio, `select filename, is_pr_document from pr_tracker.pr_attachments` shows one current PR document.
 
 Run: `pnpm exec tsc --noEmit && pnpm test`
 Expected: pass.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add -A
-git commit -m "feat(pr): create and edit purchase request form with confirmation"
+git commit -m "feat(pr): PR registration form with required PR document upload"
 ```
 
 ---
 
-### Task 18: PR detail page (header, details, timeline, remarks, private notes)
+### Task 18: PR detail page (header, PR document, details, timeline, remarks, private notes)
 
 **Files:**
 - Create:
   - `app/(app)/prs/[id]/page.tsx`
-  - `components/pr/pr-header.tsx`, `components/pr/line-items-table.tsx`, `components/pr/pr-timeline.tsx`
+  - `components/pr/pr-header.tsx`, `components/pr/pr-document-card.tsx`, `components/pr/pr-timeline.tsx`
   - `components/pr/remarks-panel.tsx`, `components/pr/private-notes-panel.tsx`
   - `app/(app)/prs/[id]/actions.ts` (initially only `addRemark`, `addPrivateNote`)
 
 **Interfaces:**
-- Consumes: the Task 10 views, Task 13 formatting/timeline, Task 15 components.
+- Consumes: the Task 10 views, Task 13 formatting/timeline, Task 15 components, `uploadAttachment` / `getAttachmentUrl` (Task 17).
 - Produces:
   - Server actions `addRemark(prId, body)` and `addPrivateNote(prId, body)`. Task 19 adds the rest to the same file.
-  - `<PrHeader pr actions?>`, `<LineItemsTable items>`, `<PrTimeline events totalSteps>`, `<RemarksPanel prId remarks canAdd>`, `<PrivateNotesPanel prId notes canAdd>`
+  - `<PrHeader pr actions?>`, `<PrDocumentCard prId doc canUpload maxMb>`, `<PrTimeline events totalSteps>`, `<RemarksPanel prId remarks canAdd>`, `<PrivateNotesPanel prId notes canAdd>`
   - `<TextActionDialog trigger title description label required? multiline? confirmLabel destructive? initialValue? successMessage onConfirm(text)>` (in `components/pr/remarks-panel.tsx`, exported; reused by Task 19)
 
 - [ ] **Step 1: Write `app/(app)/prs/[id]/actions.ts`** (first two actions)
@@ -4940,28 +4992,73 @@ export function PrivateNotesPanel({ prId, notes, canAdd }: { prId: string; notes
 }
 ```
 
-- [ ] **Step 4: Write `components/pr/line-items-table.tsx`**
+- [ ] **Step 4: Write `components/pr/pr-document-card.tsx`**
 
 ```tsx
 "use client";
-import type { ColumnDef } from "@tanstack/react-table";
-import { DataTable } from "@/components/data-table/data-table";
-import { DataTableColumnHeader } from "@/components/data-table/column-header";
-import { formatPeso } from "@/lib/format";
-import type { LineItemRow } from "@/lib/supabase/rows";
+import { useState } from "react";
+import { toast } from "sonner";
+import { AlertTriangle, ExternalLink, FileText, Upload } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
+import { formatDateTime } from "@/lib/format";
+import { validateFile } from "@/lib/pr/files";
+import { uploadAttachment } from "@/lib/pr/upload-client";
+import { getAttachmentUrl } from "@/app/(app)/prs/actions";
 
-const columns: ColumnDef<LineItemRow>[] = [
-  { accessorKey: "line_no", header: ({ column }) => <DataTableColumnHeader column={column} title="#" /> },
-  { accessorKey: "stock_no", header: "Stock/Prop. No." },
-  { accessorKey: "unit", header: "Unit" },
-  { accessorKey: "description", header: "Item description" },
-  { accessorKey: "quantity", header: ({ column }) => <DataTableColumnHeader column={column} title="Qty" />, cell: ({ row }) => Number(row.original.quantity).toLocaleString("en-PH") },
-  { accessorKey: "unit_cost", header: "Unit cost", cell: ({ row }) => formatPeso(Number(row.original.unit_cost)) },
-  { accessorKey: "total_cost", header: ({ column }) => <DataTableColumnHeader column={column} title="Total" />, cell: ({ row }) => formatPeso(Number(row.original.total_cost)) },
-];
+export type PrDocument = { id: string; filename: string; created_at: string; uploader: { full_name: string } | null };
 
-export function LineItemsTable({ items }: { items: LineItemRow[] }) {
-  return <DataTable columns={columns} data={items} searchPlaceholder="Filter items…" emptyMessage="No line items." />;
+export function PrDocumentCard({ prId, doc, canUpload, maxMb }: { prId: string; doc: PrDocument | null; canUpload: boolean; maxMb: number }) {
+  const [file, setFile] = useState<File | null>(null);
+  const problem = file ? validateFile(file, maxMb, true) : null;
+
+  async function view() {
+    const res = await getAttachmentUrl(doc!.id);
+    if (!res.ok) return toast.error(res.error);
+    window.open(res.data, "_blank", "noopener");
+  }
+
+  const uploadDialog = canUpload && (
+    <ConfirmActionDialog<string>
+      trigger={<Button size="sm" variant={doc ? "outline" : "default"}><Upload className="mr-2 size-4" />{doc ? "Replace" : "Upload PR document"}</Button>}
+      title={doc ? "Replace the PR document?" : "Upload the PR document?"}
+      description={file
+        ? <p><b>{file.name}</b> will become the official PR document.{doc && <> The current file <b>{doc.filename}</b> is kept as superseded.</>}</p>
+        : `PDF, JPG or PNG, up to ${maxMb} MB.`}
+      confirmLabel={doc ? "Replace" : "Upload"} successMessage="PR document saved"
+      canConfirm={!!file && !problem}
+      onOpenChange={(o) => o && setFile(null)}
+      onConfirm={() => uploadAttachment(prId, file!, maxMb, true)}
+    >
+      <Label htmlFor="pr-doc-file">File</Label>
+      <Input id="pr-doc-file" type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+      {problem && <p className="text-sm text-destructive">{problem}</p>}
+    </ConfirmActionDialog>
+  );
+
+  if (!doc) {
+    return (
+      <Card className="border-amber-300 bg-amber-50"><CardContent className="flex flex-wrap items-center gap-3 p-4">
+        <AlertTriangle className="size-5 text-amber-600" />
+        <p className="flex-1 text-sm">No PR document uploaded yet. This PR cannot be forwarded until the signed PR is uploaded.</p>
+        {uploadDialog}
+      </CardContent></Card>
+    );
+  }
+  return (
+    <Card><CardContent className="flex flex-wrap items-center gap-3 p-4">
+      <FileText className="size-5 text-primary" />
+      <div className="flex-1 text-sm">
+        <div className="font-medium">PR document: {doc.filename}</div>
+        <div className="text-xs text-muted-foreground">Uploaded by {doc.uploader?.full_name} · {formatDateTime(doc.created_at)}</div>
+      </div>
+      <Button size="sm" variant="outline" onClick={view}><ExternalLink className="mr-2 size-4" />View</Button>
+      {uploadDialog}
+    </CardContent></Card>
+  );
 }
 ```
 
@@ -5036,7 +5133,7 @@ export function PrHeader({ pr, actions }: { pr: PrOverviewRow; actions?: React.R
         <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <div><dt className="text-muted-foreground">Origin</dt><dd className="font-medium">{pr.origin_office_name}</dd></div>
           <div><dt className="text-muted-foreground">Date</dt><dd className="font-medium">{formatDate(pr.pr_date!)}</dd></div>
-          <div><dt className="text-muted-foreground">Grand total</dt><dd className="font-medium tabular-nums">{formatPeso(Number(pr.grand_total))}</dd></div>
+          <div><dt className="text-muted-foreground">Amount</dt><dd className="font-medium tabular-nums">{formatPeso(Number(pr.amount))}</dd></div>
           <div><dt className="text-muted-foreground">Mode of procurement</dt><dd className="font-medium">{pr.mode_of_procurement ?? "—"}</dd></div>
         </dl>
         {actions}
@@ -5057,10 +5154,11 @@ import { createClient } from "@/lib/supabase/server";
 import { availableActions } from "@/lib/pr/permissions";
 import type { MovementState } from "@/lib/types";
 import { PrHeader } from "@/components/pr/pr-header";
-import { LineItemsTable } from "@/components/pr/line-items-table";
+import { PrDocumentCard, type PrDocument } from "@/components/pr/pr-document-card";
 import { PrTimeline } from "@/components/pr/pr-timeline";
 import { RemarksPanel } from "@/components/pr/remarks-panel";
 import { PrivateNotesPanel } from "@/components/pr/private-notes-panel";
+import { formatPeso } from "@/lib/format";
 
 export default async function PrDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -5071,8 +5169,10 @@ export default async function PrDetailPage({ params }: { params: Promise<{ id: s
 
   const officeId = profile.office?.id;
   const empty = Promise.resolve({ data: [] as never[] });
-  const [items, timeline, remarks, notes] = await Promise.all([
-    supabase.from("pr_line_items").select("*").eq("pr_id", id).order("line_no"),
+  const [prDoc, maxMbRes, timeline, remarks, notes] = await Promise.all([
+    supabase.from("pr_attachments").select("id, filename, created_at, uploader:profiles(full_name)")
+      .eq("pr_id", id).eq("is_pr_document", true).is("superseded_at", null).maybeSingle(),
+    supabase.from("app_settings").select("value").eq("key", "max_upload_mb").maybeSingle(),
     supabase.from("pr_timeline").select("*").eq("pr_id", id).order("id", { ascending: false }),
     supabase.from("pr_remarks").select("id, body, created_at, author:profiles(full_name), office:offices(name)")
       .eq("pr_id", id).order("created_at", { ascending: false }),
@@ -5085,11 +5185,14 @@ export default async function PrDetailPage({ params }: { params: Promise<{ id: s
   const actions = availableActions({
     movement_state: pr.movement_state as MovementState, origin_office_id: pr.origin_office_id!,
     current_office_id: pr.current_office_id!, sent_by_office_id: pr.sent_by_office_id,
+    has_pr_document: !!pr.has_pr_document,
   }, profile);
+  const maxMb = Number(maxMbRes.data?.value ?? 20);
 
   return (
     <div className="space-y-6">
       <PrHeader pr={pr} />
+      <PrDocumentCard prId={id} doc={(prDoc.data ?? null) as PrDocument | null} canUpload={actions.has("upload_pr_document")} maxMb={maxMb} />
       <Tabs defaultValue="details">
         <TabsList className="flex-wrap">
           <TabsTrigger value="details">Details</TabsTrigger>
@@ -5103,9 +5206,8 @@ export default async function PrDetailPage({ params }: { params: Promise<{ id: s
             <div><span className="text-muted-foreground">Responsibility Center Code: </span>{pr.responsibility_center_code ?? "—"}</div>
             <div><span className="text-muted-foreground">Fund Cluster: </span>{pr.fund_cluster ?? "—"}</div>
             <div><span className="text-muted-foreground">Requested by: </span>{pr.requested_by_name}{pr.requested_by_designation ? `, ${pr.requested_by_designation}` : ""}</div>
-            <div><span className="text-muted-foreground">Approved by: </span>{pr.approved_by_name ?? "—"}{pr.approved_by_designation ? `, ${pr.approved_by_designation}` : ""}</div>
+            <div><span className="text-muted-foreground">Amount: </span>{formatPeso(Number(pr.amount))}</div>
           </CardContent></Card>
-          <LineItemsTable items={items.data ?? []} />
         </TabsContent>
         <TabsContent value="timeline"><PrTimeline events={timeline.data ?? []} totalSteps={pr.total_steps ?? 0} /></TabsContent>
         <TabsContent value="remarks">
@@ -5126,7 +5228,9 @@ export default async function PrDetailPage({ params }: { params: Promise<{ id: s
 
 Dev sign in as `cswd@test.local` and open the PR created in Task 17. Expected:
 - The header shows "Draft at City Social Welfare and Development Office".
-- The Timeline shows "Created by Carla Cswd (City Social …)".
+- The PR document card shows the uploaded file, and **View** opens it.
+- **Replace** opens a modal that accepts only PDF/JPG/PNG. After replacing, the Timeline shows "PR document replaced: … → …".
+- The Timeline also shows "Created by Carla Cswd (City Social …)".
 - **Add remark** opens a modal, and the confirm button stays disabled until text is entered. After you confirm, the remark appears.
 - Dev sign in as `treas@test.local` and open the same URL. Expected: a 404 (not involved).
 
@@ -5137,7 +5241,7 @@ Expected: pass.
 
 ```bash
 git add -A
-git commit -m "feat(pr): detail page with header, line items, timeline with edit diffs, remarks, private notes"
+git commit -m "feat(pr): detail page with header, PR document card, timeline with edit diffs, remarks, private notes"
 ```
 
 ---
@@ -5255,7 +5359,7 @@ export type Suggestion = { step_order: number; office_id: string; office_name: s
 
 type Props = {
   pr: { id: string; routing_slip_no: string; pr_no: string | null; mode_of_procurement: string | null;
-        current_office_name: string; sent_by_office_name: string | null; total_steps: number };
+        current_office_name: string; sent_by_office_name: string | null; total_steps: number; has_pr_document: boolean };
   actions: PrAction[];
   suggestion: Suggestion;
   offices: Option[];
@@ -5273,7 +5377,10 @@ const MODES = ["Competitive Bidding", "Small Value Procurement", "Shopping", "Di
 export function PrActionBar(p: Props) {
   const has = (a: PrAction) => p.actions.includes(a);
   return (
-    <div className="flex flex-wrap gap-2 border-t pt-4">
+    <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+      {has("upload_pr_document") && !p.pr.has_pr_document && (
+        <p className="w-full text-sm text-amber-700">Upload the PR document before forwarding.</p>
+      )}
       {has("receive") && p.myOfficeName && <ReceiveButton prId={p.pr.id} routingSlipNo={p.pr.routing_slip_no} officeName={p.myOfficeName} />}
       {has("forward") && <ForwardDialog {...p} />}
       {has("set_status") && <StatusDialog {...p} />}
@@ -5454,7 +5561,8 @@ Replace `<PrHeader pr={pr} />` with:
       <PrHeader pr={pr} actions={
         <PrActionBar
           pr={{ id, routing_slip_no: pr.routing_slip_no!, pr_no: pr.pr_no, mode_of_procurement: pr.mode_of_procurement,
-                current_office_name: pr.current_office_name!, sent_by_office_name: pr.sent_by_office_name, total_steps: pr.total_steps ?? 0 }}
+                current_office_name: pr.current_office_name!, sent_by_office_name: pr.sent_by_office_name, total_steps: pr.total_steps ?? 0,
+                has_pr_document: !!pr.has_pr_document }}
           actions={actionList} suggestion={suggestion}
           offices={officesRes.data ?? []} returnTargets={returnTargets} statuses={statusesRes.data ?? []}
           myOfficeId={officeId ?? null} myOfficeName={profile.office?.name ?? null}
@@ -5467,6 +5575,7 @@ Add `import { PrActionBar, type Suggestion } from "@/components/pr/pr-action-bar
 
 - [ ] **Step 5: Verify manually** (three browser profiles, or sign out and in between steps)
 
+0. As `cswd`, create a PR, and in Studio mark its PR document superseded (`update pr_tracker.pr_attachments set superseded_at = now() where …`). Reload. Expected: "Upload the PR document before forwarding." is shown and there is no **Forward** button. Upload one again using the card.
 1. As `cswd`, open the draft PR and click **Forward**. Expected: GSO is preselected "(suggested)", and the description reads "for review (step 1 of 10)". Confirm. Expected: the location line reads "In transit → General Services Office · for review · step 1 of 10".
 2. As `cswd`, **Recall** is visible. Don't use it yet.
 3. As `gso`, open the PR. Expected: only **Receive** is shown. Receive it. Then **Update status** → "For review". Then **Forward** with Mayor preselected, and confirm.
@@ -5485,50 +5594,29 @@ git commit -m "feat(pr): workflow action bar with confirmation modals for every 
 
 ---
 
-### Task 20: Attachments (upload, list, download, supersede)
+### Task 20: Other attachments (upload, list, download, supersede)
 
 **Files:**
 - Modify:
-  - `app/(app)/prs/[id]/actions.ts` (add `registerAttachment`, `supersedeAttachment`, `getAttachmentUrl`)
+  - `app/(app)/prs/[id]/actions.ts` (add `supersedeAttachment`)
   - `app/(app)/prs/[id]/page.tsx` (add the Attachments tab)
 - Create: `components/pr/attachments-panel.tsx`
 
 **Interfaces:**
-- Consumes: `register_attachment`, `supersede_attachment` (Task 9); bucket policies (Task 12); `validateFile`, `safeFileName` (Task 13).
+- Consumes: `supersede_attachment` (Task 9); bucket policies (Task 12); `validateFile` (Task 13); `uploadAttachment`, `getAttachmentUrl` (Task 17).
 - Produces:
-  - `registerAttachment(prId, path, filename, size, mime): Promise<ActionResult<string>>`
   - `supersedeAttachment(attachmentId, prId, reason)`
-  - `getAttachmentUrl(attachmentId): Promise<ActionResult<string>>`
+- The list shows **all** files, PR-document versions included (badged "PR document"). New uploads here are always ordinary attachments, because the PR document is managed by the Task 18 card.
   - `<AttachmentsPanel prId attachments canUpload myOfficeId maxMb />`
 
 - [ ] **Step 1: Add the server actions**
 
 Append to `app/(app)/prs/[id]/actions.ts`:
 ```ts
-import { createClient } from "@/lib/supabase/server";
-import type { ActionResult } from "@/lib/actions/rpc";
-
-export async function registerAttachment(prId: string, path: string, filename: string, size: number, mime: string) {
-  return rpcAction<string>("register_attachment", {
-    p_pr_id: prId, p_storage_path: path, p_filename: filename, p_size_bytes: size, p_mime_type: mime,
-  }, paths(prId));
-}
-
 export async function supersedeAttachment(attachmentId: string, prId: string, reason: string) {
   return rpcAction("supersede_attachment", { p_attachment_id: attachmentId, p_reason: reason }, paths(prId));
 }
-
-export async function getAttachmentUrl(attachmentId: string): Promise<ActionResult<string>> {
-  const supabase = await createClient();
-  const { data: att } = await supabase.from("pr_attachments").select("storage_path, filename").eq("id", attachmentId).maybeSingle();
-  if (!att) return { ok: false, error: "Attachment not found" };
-  const { data, error } = await supabase.storage.from("pr-tracker-attachments")
-    .createSignedUrl(att.storage_path, 60, { download: att.filename });
-  if (error || !data) return { ok: false, error: error?.message ?? "Could not create download link" };
-  return { ok: true, data: data.signedUrl };
-}
 ```
-(Move the new imports to the top of the file.)
 
 - [ ] **Step 2: Write `components/pr/attachments-panel.tsx`**
 
@@ -5545,14 +5633,15 @@ import { Badge } from "@/components/ui/badge";
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
 import { DataTable } from "@/components/data-table/data-table";
 import { TextActionDialog } from "./remarks-panel";
-import { createBrowserSupabase } from "@/lib/supabase/client";
-import { safeFileName, validateFile } from "@/lib/pr/files";
+import { validateFile } from "@/lib/pr/files";
+import { uploadAttachment } from "@/lib/pr/upload-client";
 import { formatDateTime } from "@/lib/format";
-import { getAttachmentUrl, registerAttachment, supersedeAttachment } from "@/app/(app)/prs/[id]/actions";
+import { getAttachmentUrl } from "@/app/(app)/prs/actions";
+import { supersedeAttachment } from "@/app/(app)/prs/[id]/actions";
 
 export type AttachmentItem = {
   id: string; filename: string; size_bytes: number; mime_type: string; created_at: string;
-  superseded_at: string | null; superseded_reason: string | null; office_id: string;
+  superseded_at: string | null; superseded_reason: string | null; office_id: string; is_pr_document: boolean;
   uploader: { full_name: string } | null; office: { name: string } | null;
 };
 
@@ -5564,13 +5653,7 @@ export function AttachmentsPanel({ prId, attachments, canUpload, myOfficeId, max
 
   async function upload() {
     if (!file) return { ok: false as const, error: "Choose a file" };
-    const err = validateFile(file, maxMb);
-    if (err) return { ok: false as const, error: err };
-    const path = `${prId}/${crypto.randomUUID()}-${safeFileName(file.name)}`;
-    const { error } = await createBrowserSupabase().storage.from("pr-tracker-attachments")
-      .upload(path, file, { contentType: file.type, upsert: false });
-    if (error) return { ok: false as const, error: `Upload failed: ${error.message}` };
-    return registerAttachment(prId, path, file.name, file.size, file.type);
+    return uploadAttachment(prId, file, maxMb, false);
   }
 
   async function download(id: string) {
@@ -5581,7 +5664,10 @@ export function AttachmentsPanel({ prId, attachments, canUpload, myOfficeId, max
 
   const columns: ColumnDef<AttachmentItem>[] = [
     { accessorKey: "filename", header: "File", cell: ({ row }) => (
-      <span className={row.original.superseded_at ? "text-muted-foreground line-through" : ""}>{row.original.filename}</span>) },
+      <span className="flex items-center gap-2">
+        <span className={row.original.superseded_at ? "text-muted-foreground line-through" : ""}>{row.original.filename}</span>
+        {row.original.is_pr_document && <Badge>PR document</Badge>}
+      </span>) },
     { id: "office", header: "Office", accessorFn: (r) => r.office?.name ?? "" },
     { id: "uploader", header: "Uploaded by", accessorFn: (r) => r.uploader?.full_name ?? "" },
     { accessorKey: "size_bytes", header: "Size", cell: ({ row }) => `${(row.original.size_bytes / 1024 / 1024).toFixed(2)} MB` },
@@ -5591,7 +5677,7 @@ export function AttachmentsPanel({ prId, attachments, canUpload, myOfficeId, max
     { id: "actions", header: "", enableHiding: false, cell: ({ row }) => (
       <div className="flex justify-end gap-1">
         <Button variant="ghost" size="sm" onClick={() => download(row.original.id)}><Download className="mr-1 size-4" />Download</Button>
-        {!row.original.superseded_at && row.original.office_id === myOfficeId && (
+        {!row.original.superseded_at && !row.original.is_pr_document && row.original.office_id === myOfficeId && (
           <TextActionDialog
             trigger={<Button variant="ghost" size="sm">Mark superseded</Button>}
             title={`Mark "${row.original.filename}" as superseded?`}
@@ -5633,16 +5719,15 @@ export function AttachmentsPanel({ prId, attachments, canUpload, myOfficeId, max
 Add these to the `Promise.all` in `page.tsx`:
 ```ts
     supabase.from("pr_attachments")
-      .select("id, filename, size_bytes, mime_type, created_at, superseded_at, superseded_reason, office_id, uploader:profiles(full_name), office:offices(name)")
+      .select("id, filename, size_bytes, mime_type, created_at, superseded_at, superseded_reason, office_id, is_pr_document, uploader:profiles(full_name), office:offices(name)")
       .eq("pr_id", id).order("created_at"),
-    supabase.from("app_settings").select("value").eq("key", "max_upload_mb").maybeSingle(),
 ```
-Destructure them as `attachments, maxMbRes`. Add the trigger `<TabsTrigger value="attachments">Attachments ({attachments.data?.length ?? 0})</TabsTrigger>` and the content:
+Destructure it as `attachments`. The `maxMb` value already exists from Task 18. Add the trigger `<TabsTrigger value="attachments">Attachments ({attachments.data?.length ?? 0})</TabsTrigger>` and the content:
 ```tsx
         <TabsContent value="attachments">
           <AttachmentsPanel prId={id} attachments={(attachments.data ?? []) as never}
             canUpload={actions.has("add_attachment")} myOfficeId={officeId ?? null}
-            maxMb={Number(maxMbRes.data?.value ?? 20)} />
+            maxMb={maxMb} />
         </TabsContent>
 ```
 
@@ -5652,6 +5737,7 @@ As the office holding the PR, upload a small PDF and confirm. Expected:
 - It appears as "Current", and **Download** opens it.
 - Choosing a `.txt` renamed to `.pdf` with type `text/plain` shows "File type not allowed…", and the confirm button is disabled.
 - **Mark superseded** requires a reason, and the row then shows struck through.
+- PR-document versions (current and superseded) appear with a **PR document** badge, and have no **Mark superseded** button.
 - As `treas` (uninvolved), `supabase.storage.from('pr-tracker-attachments').download(path)` in the browser console must fail.
 
 Run: `pnpm exec tsc --noEmit && pnpm build`
@@ -5867,8 +5953,8 @@ const purpose: ColumnDef<PrOverviewRow> = {
   accessorKey: "purpose", header: "Purpose", cell: ({ row }) => <span className="line-clamp-2 max-w-72">{row.original.purpose}</span>,
 };
 const amount: ColumnDef<PrOverviewRow> = {
-  accessorKey: "grand_total", header: ({ column }) => <DataTableColumnHeader column={column} title="Amount" />,
-  cell: ({ row }) => <span className="tabular-nums">{formatPeso(Number(row.original.grand_total))}</span>,
+  accessorKey: "amount", header: ({ column }) => <DataTableColumnHeader column={column} title="Amount" />,
+  cell: ({ row }) => <span className="tabular-nums">{formatPeso(Number(row.original.amount))}</span>,
 };
 const days = (title: string): ColumnDef<PrOverviewRow> => ({
   accessorKey: "days_here", header: ({ column }) => <DataTableColumnHeader column={column} title={title} />,
@@ -6164,7 +6250,7 @@ export function PrListTable({ rows, rowCount, pageIndex, pageSize, offices }: {
     { accessorKey: "movement_state", header: "State", enableSorting: false, cell: ({ row }) => <MovementBadge state={row.original.movement_state as MovementState} /> },
     { accessorKey: "current_status_label", header: "Status", enableSorting: false, cell: ({ row }) => row.original.current_status_label ?? "—" },
     { accessorKey: "days_here", header: ({ column }) => <DataTableColumnHeader column={column} title="Days here" />, cell: ({ row }) => formatDaysHere(Number(row.original.days_here)) },
-    { accessorKey: "grand_total", header: ({ column }) => <DataTableColumnHeader column={column} title="Amount" />, cell: ({ row }) => <span className="tabular-nums">{formatPeso(Number(row.original.grand_total))}</span> },
+    { accessorKey: "amount", header: ({ column }) => <DataTableColumnHeader column={column} title="Amount" />, cell: ({ row }) => <span className="tabular-nums">{formatPeso(Number(row.original.amount))}</span> },
   ];
 
   return (
@@ -6187,7 +6273,7 @@ export function PrListTable({ rows, rowCount, pageIndex, pageSize, offices }: {
 }
 ```
 
-`DataTable` maps sort ids from `accessorKey`. These match the `SORTABLE` whitelist in `parseListParams` (`routing_slip_no`, `pr_no`, `pr_date`, `days_here`, `grand_total`).
+`DataTable` maps sort ids from `accessorKey`. These match the `SORTABLE` whitelist in `parseListParams` (`routing_slip_no`, `pr_no`, `pr_date`, `days_here`, `amount`).
 
 - [ ] **Step 6: Write `app/(app)/prs/page.tsx`**
 
@@ -6209,8 +6295,8 @@ export default async function PrListPage({ searchParams }: { searchParams: Promi
   if (p.office) query = query.eq("current_office_id", p.office);
   if (p.from) query = query.gte("pr_date", p.from);
   if (p.to) query = query.lte("pr_date", p.to);
-  if (p.min) query = query.gte("grand_total", Number(p.min));
-  if (p.max) query = query.lte("grand_total", Number(p.max));
+  if (p.min) query = query.gte("amount", Number(p.min));
+  if (p.max) query = query.lte("amount", Number(p.max));
   const from = (p.page - 1) * p.size;
 
   const [{ data, count, error }, { data: offices }] = await Promise.all([
@@ -6233,11 +6319,11 @@ export default async function PrListPage({ searchParams }: { searchParams: Promi
 Create about 30 PRs locally with this SQL in Studio. Run it as the cswd user by temporarily inserting through the RPC in a `do` block with `set_config`, or create them through the UI:
 ```sql
 select set_config('request.jwt.claims', json_build_object('sub', (select auth_user_id from pr_tracker.profiles where email='cswd@test.local'), 'role','authenticated')::text, true);
-select pr_tracker.create_pr(tests.sample_header(), tests.sample_items()) from generate_series(1,30);
+select pr_tracker.create_pr(tests.sample_header()) from generate_series(1,30);
 ```
 Then check:
 - Pagination shows "Page 1 of 2" at size 25.
-- Sorting by Amount updates the URL (`sort=grand_total.asc`).
+- Sorting by Amount updates the URL (`sort=amount.asc`).
 - Searching "Office supplies" filters the rows.
 - The State filter works.
 - Selecting two rows and clicking **Print selected slips (2)** opens a new tab. That tab 404s until Task 24, which is fine.
@@ -6386,7 +6472,7 @@ export default async function TrackResultPage({ params }: { params: Promise<{ rs
 import { formatDate, formatPeso } from "@/lib/format";
 import { truncate, type SlipRow } from "@/lib/pr/routing-slip";
 
-type SlipPr = { routing_slip_no: string; pr_no: string | null; origin_office_name: string; pr_date: string; purpose: string; grand_total: number };
+type SlipPr = { routing_slip_no: string; pr_no: string | null; origin_office_name: string; pr_date: string; purpose: string; amount: number };
 
 export function RoutingSlip({ lguName, pr, qr, rows, pageBreak }: { lguName: string; pr: SlipPr; qr: string; rows: SlipRow[]; pageBreak: boolean }) {
   return (
@@ -6408,7 +6494,7 @@ export function RoutingSlip({ lguName, pr, qr, rows, pageBreak }: { lguName: str
         <div><dt className="inline font-semibold">Origin: </dt><dd className="inline">{pr.origin_office_name}</dd></div>
         <div><dt className="inline font-semibold">Date: </dt><dd className="inline">{formatDate(pr.pr_date)}</dd></div>
         <div className="col-span-2"><dt className="inline font-semibold">Purpose: </dt><dd className="inline">{truncate(pr.purpose, 110)}</dd></div>
-        <div className="col-span-2"><dt className="inline font-semibold">Amount: </dt><dd className="inline">{formatPeso(pr.grand_total)}</dd></div>
+        <div className="col-span-2"><dt className="inline font-semibold">Amount: </dt><dd className="inline">{formatPeso(pr.amount)}</dd></div>
       </dl>
       <table className="mt-[2mm] w-full table-fixed border-collapse">
         <thead>
@@ -6497,7 +6583,7 @@ export default async function PrintSlipsPage({ searchParams }: { searchParams: P
           <RoutingSlip key={pr.id} lguName={lguName} qr={qr} rows={rows}
             pageBreak={fourUp ? (i + 1) % 4 === 0 : true}
             pr={{ routing_slip_no: pr.routing_slip_no!, pr_no: pr.pr_no, origin_office_name: pr.origin_office_name!,
-                  pr_date: pr.pr_date!, purpose: pr.purpose!, grand_total: Number(pr.grand_total) }} />
+                  pr_date: pr.pr_date!, purpose: pr.purpose!, amount: Number(pr.amount) }} />
         ))}
       </div>
     </div>
@@ -7230,7 +7316,7 @@ git commit -m "feat(admin): users, offices, drag-and-drop default route, office 
 - Modify: `supabase/seed.sql` (add an auth user with no profile)
 
 **Interfaces:**
-- Consumes: the local seed users (Task 5) and the UI labels defined in Tasks 14–26. Button names used: "Dev sign in", "Create PR", "Forward", "Receive", "Return", "Edit", "Save changes", "Assign PR No.", "Save PR No.", "Complete", "Update status". The "Destination office" and "Return to office" comboboxes are used too.
+- Consumes: the local seed users (Task 5) and the UI labels defined in Tasks 14–26. The labels "Amount (₱)" and the file input labelled "PDF, JPG or PNG, up to N MB" come from Task 17. Button names used: "Dev sign in", "Create PR", "Forward", "Receive", "Return", "Edit", "Save changes", "Assign PR No.", "Save PR No.", "Complete", "Update status". The "Destination office" and "Return to office" comboboxes are used too.
 
 - [ ] **Step 1: Add the unauthorized test user to `supabase/seed.sql`** (append)
 
@@ -7294,14 +7380,17 @@ export async function confirm(page: Page, name: string) {
 export async function createPr(page: Page, purpose: string): Promise<string> {
   await page.goto("/prs/new");
   await page.getByLabel("Purpose").fill(purpose);
-  await page.getByLabel("Line 1 unit").fill("ream");
-  await page.getByLabel("Line 1 description").fill("Bond paper A4");
-  await page.getByLabel("Line 1 quantity").fill("10");
-  await page.getByLabel("Line 1 unit cost").fill("245.50");
+  await page.getByLabel("Amount (₱)").fill("2455");
+  await page.getByLabel(/PDF, JPG or PNG/).setInputFiles({
+    name: "signed-pr.pdf", mimeType: "application/pdf",
+    buffer: Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF"),
+  });
   await page.getByRole("button", { name: "Create PR" }).click();
   await expect(page.getByRole("dialog")).toContainText("₱2,455.00");
+  await expect(page.getByRole("dialog")).toContainText("signed-pr.pdf");
   await confirm(page, "Create PR");
   await page.waitForURL(/\/prs\/[0-9a-f-]{36}$/);
+  await expect(page.getByText("PR document: signed-pr.pdf")).toBeVisible();
   return new URL(page.url()).pathname;
 }
 
