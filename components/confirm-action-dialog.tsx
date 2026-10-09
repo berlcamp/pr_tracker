@@ -36,16 +36,21 @@ export function ConfirmActionDialog<T>({
 
   function confirm() {
     startTransition(async () => {
-      const result = await onConfirm();
-      if (!result.ok) {
-        toast.error(result.error);
+      try {
+        const result = await onConfirm();
+        if (!result.ok) {
+          toast.error(result.error);
+          router.refresh();
+          return;
+        }
+        toast.success(successMessage);
+        setOpen(false);
+        onSuccess?.(result.data);
         router.refresh();
-        return;
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Something went wrong");
+        router.refresh();
       }
-      toast.success(successMessage);
-      setOpen(false);
-      onSuccess?.(result.data);
-      router.refresh();
     });
   }
 

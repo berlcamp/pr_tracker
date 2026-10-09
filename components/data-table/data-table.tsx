@@ -40,7 +40,7 @@ export function DataTable<TData, TValue>({
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
 
   function pushParams(patch: Record<string, string | null>) {
-    const next = new URLSearchParams(params.toString());
+    const next = new URLSearchParams(window.location.search);
     for (const [k, v] of Object.entries(patch)) { if (v) next.set(k, v); else next.delete(k); }
     router.replace(`${pathname}?${next.toString()}`, { scroll: false });
   }
@@ -49,7 +49,7 @@ export function DataTable<TData, TValue>({
   useEffect(() => {
     if (!server) return;
     const t = setTimeout(() => {
-      if ((params.get("q") ?? "") !== globalFilter) pushParams({ q: globalFilter || null, page: null });
+      if ((new URLSearchParams(window.location.search).get("q") ?? "") !== globalFilter) pushParams({ q: globalFilter || null, page: null });
     }, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -116,7 +116,7 @@ export function DataTable<TData, TValue>({
                 ))}
               </TableRow>
             )) : (
-              <TableRow><TableCell colSpan={columns.length} className="h-20 text-center text-muted-foreground">{emptyMessage}</TableCell></TableRow>
+              <TableRow><TableCell colSpan={table.getVisibleLeafColumns().length} className="h-20 text-center text-muted-foreground">{emptyMessage}</TableCell></TableRow>
             )}
           </TableBody>
         </Table>
