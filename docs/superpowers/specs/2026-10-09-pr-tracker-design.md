@@ -86,9 +86,35 @@ End-user departments (e.g. CSWD, CHO, CEO) are added by admins. Any office, incl
 - `can_complete` — default: TREAS only
 
 ### Default route
-- An ordered list (`default_route_steps`) editable in Settings via drag-and-drop. Seed order (editable): **Origin → BUDGET → BAC → GSO → MAYOR → ACCTG → TREAS**.
-- When forwarding, the system **preselects the next office in the default route** after the current office (from the origin, the first step).
-- The user may pick **any** active office. If it differs from the suggestion, an **override reason is required** and stored in the audit event.
+- An ordered list of **steps** (`default_route_steps`) editable in Settings via drag-and-drop. Each step has an office and a **purpose** label. **The same office may appear in several steps.**
+- Seed route (editable):
+
+| Step | Office | Purpose |
+|---|---|---|
+| 0 | Origin (end-user office) | Preparation |
+| 1 | GSO | For review |
+| 2 | MAYOR | For approval |
+| 3 | BUDGET | For certification of funds |
+| 4 | MAYOR | For approval |
+| 5 | BAC | For procurement |
+| 6 | MAYOR | For signing of NOA / NTP |
+| 7 | BAC | For processing |
+| 8 | GSO | For processing |
+| 9 | ACCTG | For processing |
+| 10 | TREAS | For payment processing |
+
+  Purposes for steps 3, 5, 7, 8, 9, 10 are placeholders. Admins can edit them.
+
+### Route position
+- Because offices repeat, the suggestion is based on the PR's **route position**, not its current office. Each PR stores `route_step` (0 = origin/draft).
+- **Suggested next stop** = step `route_step + 1`. The forward modal preselects that office and shows its purpose, e.g. "Forward to Mayor's Office · for approval".
+- **Forward rules:**
+  - **Forward to the suggested step** → `route_step` advances by 1. No reason is needed.
+  - **Forward to an office that appears later in the route** (skipping ahead) → `route_step` jumps to the **first later step** with that office. An override reason is required.
+  - **Forward to an office not ahead in the route** (off-route, e.g. Legal, or an earlier office) → `route_step` is unchanged. An override reason is required. When that office forwards again, the suggestion is still step `route_step + 1`, so the PR rejoins the route.
+- **Return / recall** → `route_step` is restored to the value it had when the destination office last held the PR (read from that office's latest `received` event).
+- The forward event stores `from_route_step`, `to_route_step` and the step purpose, so the timeline reads "Forwarded to Mayor's Office for approval (step 4 of 10)".
+- If admins edit the route later, PRs already in progress keep their numeric `route_step`. The suggestion uses the current route definition, and users can always override it.
 
 ## 6. Purchase Request form
 
@@ -133,12 +159,14 @@ Follows the **standard government Purchase Request form**.
   - BUDGET: For certification of funds; Funds certified / earmarked; Insufficient funds
   - BAC: For mode determination; For posting (PhilGEPS); For canvass; Awarded
   - GSO: For review; For canvass; For purchase
-  - MAYOR: For Mayor's approval; Approved; Disapproved
+  - MAYOR: For Mayor's approval; Approved; Disapproved; For signing of NOA/NTP; NOA/NTP signed
   - ACCTG: For obligation; Obligated
   - TREAS: For payment processing; Paid
 
 ### Display format
 `Received at Mayor's Office · For Mayor's approval · 3 days here`
+
+While a PR is in transit it shows the step purpose: `In transit → Mayor's Office · for signing of NOA/NTP · step 6 of 10`.
 
 ## 8. Workflow actions
 
@@ -152,10 +180,10 @@ All actions are **Postgres functions (RPC)** in `pr_tracker`, `SECURITY DEFINER`
 |---|---|---|
 | `create_pr(header, items)` | Any active staff | Creates a `draft` PR, generates the routing slip no., sets the origin office, adds the origin to involved offices and followers. |
 | `update_pr_content(pr_id, header, items)` | Origin office | Allowed only in `draft`, or in `received` at the origin after a return. Snapshots the change after the first forward. |
-| `forward_pr(pr_id, to_office_id, override_reason?, remark?)` | Holding office | PR is `draft` (origin) or `received` at caller's office. Override reason is required if the destination isn't the default next stop. The PR becomes `in_transit`. |
-| `recall_pr(pr_id, reason?)` | The office that forwarded/returned it | Only while still `in_transit`/`returned` (not yet received). The PR returns to `received` at the caller's office (or `draft` if it was never received elsewhere). |
+| `forward_pr(pr_id, to_office_id, override_reason?, remark?)` | Holding office | PR is `draft` (origin) or `received` at caller's office. Override reason is required if the destination isn't the office at step `route_step + 1`. Updates `route_step` per §5 Route position. The PR becomes `in_transit`. |
+| `recall_pr(pr_id, reason?)` | The office that forwarded/returned it | Only while still `in_transit`/`returned` (not yet received). The PR returns to `received` at the caller's office (or `draft` if it was never received elsewhere), and `route_step` is restored to the caller's value. |
 | `receive_pr(pr_id)` | Destination office staff | PR is `in_transit` or `returned` to caller's office. The PR becomes `received`; sets `current_since = now()`, clears `current_status_id`, adds the office to involved offices. |
-| `return_pr(pr_id, to_office_id, reason)` | Holding office | Destination must be the origin or an office that previously held the PR. Reason required. The PR becomes `returned`. |
+| `return_pr(pr_id, to_office_id, reason)` | Holding office | Destination must be the origin or an office that previously held the PR. Reason required. Restores `route_step` to the destination's last value. The PR becomes `returned`. |
 | `set_status(pr_id, status_id, remark?)` | Holding office | Status belongs to caller's office. |
 | `add_remark(pr_id, body)` | Holding office or origin office | Visible to involved offices. |
 | `add_private_note(pr_id, body)` | Holding office | Visible only to the authoring office. |
@@ -186,6 +214,7 @@ purchase_requests(id, routing_slip_no UNIQUE, pr_no UNIQUE NULL,
          grand_total NUMERIC,
          movement_state ENUM, current_office_id → offices,
          current_status_id → office_statuses NULL, current_since TIMESTAMPTZ,
+         route_step INT DEFAULT 0,
          first_forwarded_at NULL, created_by → profiles, created_at, updated_at)
 
 pr_line_items(id, pr_id → purchase_requests, line_no, stock_no, unit,
@@ -194,7 +223,8 @@ pr_line_items(id, pr_id → purchase_requests, line_no, stock_no, unit,
 
 pr_involved_offices(pr_id, office_id, PRIMARY KEY(pr_id, office_id))
 
-default_route_steps(id, step_order UNIQUE, office_id → offices UNIQUE)
+default_route_steps(id, step_order UNIQUE, office_id → offices, purpose)
+   -- office_id is NOT unique: offices can repeat in the route
 
 office_statuses(id, office_id → offices, label, sort_order, active)
 
@@ -202,7 +232,9 @@ routing_slip_counters(year PRIMARY KEY, last_value)
 
 pr_events(id, pr_id, event_type ENUM, actor_id → profiles,
           actor_office_id → offices, from_office_id NULL, to_office_id NULL,
-          status_id NULL, override_reason NULL, remark NULL, payload JSONB,
+          status_id NULL, override_reason NULL, remark NULL,
+          from_route_step NULL, to_route_step NULL, route_purpose NULL,
+          payload JSONB,
           created_at)
    event_type: created, edited, forwarded, recalled, received, returned,
                status_changed, remark_added, private_note_added,
@@ -287,7 +319,7 @@ Private notes do write a `pr_events` row (type `private_note_added`) so the time
 - **Every action button** opens a confirmation modal stating exactly what will happen. Example: "Forward RS-2026-10-00012 to Mayor's Office?"
 - This applies to all workflow actions, remark/note/attachment submission, and admin changes.
 - Reasons and remarks (override, return, cancel, recall) are entered inside the modal.
-- When the destination isn't the default next office, the modal shows a warning and requires a reason.
+- The forward modal preselects the suggested step's office and purpose. When the user picks a different office, the modal shows a warning and requires a reason.
 - The confirm button shows a loading state and is disabled while pending (no double submits).
 
 ## 13. Routing slip (print)
@@ -299,7 +331,8 @@ Private notes do write a `pr_events` row (type `private_note_added`) so the time
   - **QR code** → `{APP_URL}/track/{routing_slip_no}`.
   - Routing Slip No. in large type.
   - PR No. (blank if unassigned), origin office, date, purpose (truncated), grand total.
-  - A signature table with columns **Office | Received by (signature over printed name) | Date/Time | Remarks**. Rows are pre-filled from the default route, plus 2 blank rows for overrides.
+  - A signature table with columns **Office / Purpose | Received by (signature over printed name) | Date/Time | Remarks**. There is one row per route step (10 with the seed route, in step order, so repeated offices get separate rows), plus 2 blank rows for overrides.
+  - Fitting ~12 rows on a 148.5 mm-tall slip means compact rows (~6.5 mm), small type (~7 pt) and a small QR code (~22 mm) beside the header. If the route grows too long for one side, the table continues on the back of the slip.
 
 ## 14. Reports
 
