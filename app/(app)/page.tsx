@@ -39,7 +39,7 @@ export default async function DashboardPage() {
     supabase.from("pr_overview").select("*").eq("origin_office_id", officeId).not("movement_state", "in", "(completed,cancelled)")
       .order("updated_at", { ascending: false }).limit(100),
     supabase.from("purchase_requests").select("id", { count: "exact", head: true }).eq("origin_office_id", officeId).eq("movement_state", "draft"),
-    supabase.from("purchase_requests").select("id", { count: "exact", head: true }).eq("movement_state", "completed").gte("current_since", manilaMonthStart()),
+    supabase.from("purchase_requests").select("id", { count: "exact", head: true }).eq("origin_office_id", officeId).eq("movement_state", "completed").gte("current_since", manilaMonthStart()),
     supabase.from("followed_activity").select("*").order("id", { ascending: false }).limit(15),
     supabase.from("app_settings").select("value").eq("key", "stuck_threshold_days").maybeSingle(),
   ]);
