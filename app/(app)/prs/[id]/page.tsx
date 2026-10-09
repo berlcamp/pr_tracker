@@ -10,6 +10,7 @@ import { PrDocumentCard, type PrDocument } from "@/components/pr/pr-document-car
 import { PrTimeline } from "@/components/pr/pr-timeline";
 import { RemarksPanel } from "@/components/pr/remarks-panel";
 import { PrivateNotesPanel } from "@/components/pr/private-notes-panel";
+import { PrActionBar, type Suggestion } from "@/components/pr/pr-action-bar";
 import { formatPeso } from "@/lib/format";
 
 export default async function PrDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -41,9 +42,34 @@ export default async function PrDetailPage({ params }: { params: Promise<{ id: s
   }, profile);
   const maxMb = Number(maxMbRes.data?.value ?? 20);
 
+  const actionList = [...actions];
+  const [suggestionRes, officesRes, involvedRes, statusesRes, followRes] = await Promise.all([
+    actions.has("forward") ? supabase.rpc("suggest_next_step", { p_pr_id: id }) : Promise.resolve({ data: null }),
+    supabase.from("offices").select("id, name").eq("active", true).order("name"),
+    supabase.from("pr_involved_offices").select("office_id, office:offices(name)").eq("pr_id", id),
+    officeId ? supabase.from("office_statuses").select("id, label").eq("office_id", officeId).eq("active", true).order("sort_order") : empty,
+    officeId ? supabase.from("pr_followers").select("office_id").eq("pr_id", id).eq("office_id", officeId) : empty,
+  ]);
+  const suggestion = ((suggestionRes.data as { next?: unknown } | null)?.next ?? null) as Suggestion;
+  const returnTargets = (involvedRes.data ?? [])
+    .filter((i) => i.office_id !== officeId)
+    .map((i) => ({ id: i.office_id, name: (i.office as { name: string } | null)?.name ?? "" }));
+  const terminal = pr.movement_state === "completed" || pr.movement_state === "cancelled";
+
   return (
     <div className="space-y-6">
-      <PrHeader pr={pr} />
+      <PrHeader pr={pr} actions={
+        <PrActionBar
+          pr={{ id, routing_slip_no: pr.routing_slip_no!, pr_no: pr.pr_no, mode_of_procurement: pr.mode_of_procurement,
+                current_office_name: pr.current_office_name!, sent_by_office_name: pr.sent_by_office_name, total_steps: pr.total_steps ?? 0,
+                has_pr_document: !!pr.has_pr_document }}
+          actions={actionList} suggestion={suggestion}
+          offices={officesRes.data ?? []} returnTargets={returnTargets} statuses={statusesRes.data ?? []}
+          myOfficeId={officeId ?? null} myOfficeName={profile.office?.name ?? null}
+          isFollowing={(followRes.data ?? []).length > 0}
+          canFollow={!!officeId && !terminal}
+        />
+      } />
       <PrDocumentCard prId={id} doc={(prDoc.data ?? null) as PrDocument | null} canUpload={actions.has("upload_pr_document")} maxMb={maxMb} />
       <Tabs defaultValue="details">
         <TabsList className="flex-wrap">
