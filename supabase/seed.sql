@@ -72,3 +72,49 @@ begin
 end $$;
 
 grant execute on all functions in schema tests to authenticated, anon;
+
+-- ---------- local demo data (E2E + manual testing) ----------
+update pr_tracker.app_settings set value = '["google","email"]'::jsonb where key = 'allowed_auth_providers';
+
+insert into pr_tracker.offices (code, name) values ('CSWD', 'City Social Welfare and Development Office')
+on conflict (code) do nothing;
+
+create or replace function tests.create_password_user(p_email text, p_password text)
+returns uuid language plpgsql as $$
+declare v_id uuid := gen_random_uuid();
+begin
+  insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
+                          raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+                          confirmation_token, recovery_token, email_change_token_new, email_change,
+                          email_change_token_current, phone_change, phone_change_token, reauthentication_token)
+  values (v_id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', p_email,
+          extensions.crypt(p_password, extensions.gen_salt('bf')), now(),
+          '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb, now(), now(),
+          '', '', '', '', '', '', '', '');
+  insert into auth.identities (id, user_id, provider_id, provider, identity_data, last_sign_in_at, created_at, updated_at)
+  values (gen_random_uuid(), v_id, v_id::text, 'email',
+          jsonb_build_object('sub', v_id::text, 'email', p_email, 'email_verified', true), now(), now(), now());
+  return v_id;
+end $$;
+
+do $$
+declare r record;
+begin
+  for r in select * from (values
+    ('cswd@test.local',   'CSWD',   'staff', 'Carla Cswd'),
+    ('gso@test.local',    'GSO',    'staff', 'Gabriel Gso'),
+    ('mayor@test.local',  'MAYOR',  'staff', 'Marites Mayor'),
+    ('budget@test.local', 'BUDGET', 'staff', 'Benjie Budget'),
+    ('bac@test.local',    'BAC',    'staff', 'Bea Bac'),
+    ('acctg@test.local',  'ACCTG',  'staff', 'Andres Acctg'),
+    ('treas@test.local',  'TREAS',  'staff', 'Tess Treas'),
+    ('admin@test.local',  null,     'admin', 'Ada Admin')
+  ) as t(email, code, role, name)
+  loop
+    insert into pr_tracker.profiles (auth_user_id, email, full_name, designation, office_id, role)
+    values (tests.create_password_user(r.email, 'password123'), r.email, r.name, 'Staff',
+            (select id from pr_tracker.offices where code = r.code), r.role::pr_tracker.user_role);
+  end loop;
+end $$;
+
+grant execute on all functions in schema tests to authenticated, anon;
