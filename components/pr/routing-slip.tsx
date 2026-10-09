@@ -3,11 +3,11 @@ import { truncate, type SlipRow } from "@/lib/pr/routing-slip";
 
 type SlipPr = { routing_slip_no: string; pr_no: string | null; origin_office_name: string; pr_date: string; purpose: string; amount: number };
 
-export function RoutingSlip({ lguName, pr, qr, rows, pageBreak }: { lguName: string; pr: SlipPr; qr: string; rows: SlipRow[]; pageBreak: boolean }) {
+export function RoutingSlip({ lguName, pr, qr, rows }: { lguName: string; pr: SlipPr; qr: string; rows: SlipRow[] }) {
   return (
     <section
       className="box-border flex h-[148.5mm] w-[105mm] flex-col overflow-hidden border border-dashed border-gray-300 p-[5mm] text-[7pt] leading-tight text-black"
-      style={{ breakInside: "avoid", breakAfter: pageBreak ? "page" : "auto" }}
+      style={{ breakInside: "avoid" }}
     >
       <header className="flex gap-[3mm]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -36,10 +36,10 @@ export function RoutingSlip({ lguName, pr, qr, rows, pageBreak }: { lguName: str
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={i} className="h-[6.5mm] align-top">
-              <td className="border border-black px-[1mm]">
-                <div className="font-semibold">{r.label}</div>
-                {r.purpose && <div className="text-[6pt]">{r.purpose}</div>}
+            <tr key={i} className="h-[6.5mm] max-h-[6.5mm] align-top">
+              <td className="h-[6.5mm] overflow-hidden border border-black px-[1mm]" title={r.purpose ? `${r.label}: ${r.purpose}` : undefined}>
+                <div className="truncate whitespace-nowrap font-semibold">{r.label}</div>
+                {r.purpose && <div className="truncate whitespace-nowrap text-[6pt]">{r.purpose}</div>}
               </td>
               <td className="border border-black" /><td className="border border-black" /><td className="border border-black" />
             </tr>

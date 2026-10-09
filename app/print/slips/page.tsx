@@ -25,6 +25,8 @@ export default async function PrintSlipsPage({ searchParams }: { searchParams: P
   const slips = await Promise.all(ordered.map(async (pr) => ({
     pr, qr: await QRCode.toDataURL(trackUrl(appUrl, pr.routing_slip_no!), { margin: 0, width: 240, errorCorrectionLevel: "M" }),
   })));
+  const per = fourUp ? 4 : 1;
+  const sheets = Array.from({ length: Math.ceil(slips.length / per) }, (_, i) => slips.slice(i * per, (i + 1) * per));
   const lguName = String(lgu?.value ?? "");
 
   return (
@@ -32,14 +34,17 @@ export default async function PrintSlipsPage({ searchParams }: { searchParams: P
       <style>{fourUp ? "@page { size: A4 portrait; margin: 0; }" : "@page { size: 105mm 148.5mm; margin: 0; }"}</style>
       <PrintToolbar ids={idList.join(",")} fourUp={fourUp} />
       {slips.length === 0 && <p className="p-6 text-sm">No PRs to print (you may not have access to the selected PRs).</p>}
-      <div className={fourUp ? "grid w-[210mm] grid-cols-2" : ""}>
-        {slips.map(({ pr, qr }, i) => (
-          <RoutingSlip key={pr.id} lguName={lguName} qr={qr} rows={rows}
-            pageBreak={fourUp ? (i + 1) % 4 === 0 : true}
-            pr={{ routing_slip_no: pr.routing_slip_no!, pr_no: pr.pr_no, origin_office_name: pr.origin_office_name!,
-                  pr_date: pr.pr_date!, purpose: pr.purpose!, amount: Number(pr.amount) }} />
-        ))}
-      </div>
+      {sheets.map((sheet, si) => (
+        <div key={si}
+          className={fourUp ? "grid h-[297mm] w-[210mm] grid-cols-2 grid-rows-2 overflow-hidden" : "h-[148.5mm] w-[105mm] overflow-hidden"}
+          style={{ breakAfter: si < sheets.length - 1 ? "page" : "auto" }}>
+          {sheet.map(({ pr, qr }) => (
+            <RoutingSlip key={pr.id} lguName={lguName} qr={qr} rows={rows}
+              pr={{ routing_slip_no: pr.routing_slip_no!, pr_no: pr.pr_no, origin_office_name: pr.origin_office_name!,
+                    pr_date: pr.pr_date!, purpose: pr.purpose!, amount: Number(pr.amount) }} />
+          ))}
+        </div>
+      ))}
     </div>
   );
 }

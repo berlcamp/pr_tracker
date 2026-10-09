@@ -4,9 +4,11 @@ import { TrackingView, type TrackingResult } from "@/components/pr/tracking-view
 import { TrackForm } from "../track-form";
 
 export default async function TrackResultPage({ params }: { params: Promise<{ rs: string }> }) {
-  const { rs } = await params;
+  const { rs: rawRs } = await params;
+  let rs = rawRs;
+  try { rs = decodeURIComponent(rawRs); } catch { /* malformed escape: use raw value */ }
   const supabase = await createClient();
-  const { data } = await supabase.rpc("tracking_lookup", { p_routing_slip_no: decodeURIComponent(rs) });
+  const { data } = await supabase.rpc("tracking_lookup", { p_routing_slip_no: rs });
   const result = data as unknown as TrackingResult | null;
   if (result?.can_view && result.pr_id) redirect(`/prs/${result.pr_id}`);
   return (
@@ -14,7 +16,7 @@ export default async function TrackResultPage({ params }: { params: Promise<{ rs
       <h1 className="text-2xl font-semibold">Track a PR</h1>
       <TrackForm />
       {result ? <TrackingView data={result} />
-              : <p className="text-sm text-muted-foreground">No purchase request found for <span className="font-mono">{decodeURIComponent(rs)}</span>.</p>}
+              : <p className="text-sm text-muted-foreground">No purchase request found for <span className="font-mono">{rs}</span>.</p>}
     </div>
   );
 }
