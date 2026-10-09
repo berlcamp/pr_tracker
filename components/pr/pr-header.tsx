@@ -21,7 +21,7 @@ export function PrHeader({ pr, actions }: { pr: PrOverviewRow; actions?: React.R
           <div className="flex items-center gap-2">
             <MovementBadge state={state} />
             <Button asChild variant="outline" size="sm">
-              <Link href={`/print/slip/${pr.id}`} target="_blank"><Printer className="mr-2 size-4" />Print routing slip</Link>
+              <Link href={`/print/slips?ids=${pr.id}&layout=single`} target="_blank"><Printer className="mr-2 size-4" />Print routing slip</Link>
             </Button>
           </div>
         </div>
