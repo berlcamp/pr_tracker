@@ -118,3 +118,6 @@ begin
 end $$;
 
 grant execute on all functions in schema tests to authenticated, anon;
+
+-- auth user with NO profile, for the unauthorized-login E2E test
+select tests.create_password_user('nobody@test.local', 'password123');
