@@ -1,36 +1,33 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# LGU Purchase Request Tracker
 
-## Getting Started
+Tracks where each Purchase Request physically is and its processing status, with a tamper-proof audit trail.
 
-First, run the development server:
+## Stack
+Next.js 16 · Supabase (schema `pr_tracker`, shared project) · shadcn/ui · TanStack Table · Vercel
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Local development
+1. `pnpm install`
+2. `supabase start` (Docker required), then copy the API URL + anon key into `.env.local` (see `.env.example`)
+3. `supabase db reset` (applies migrations + local-only `supabase/seed.sql` demo users)
+4. `pnpm dev` → http://localhost:3000/dev-login (password `password123`):
+   cswd@, gso@, mayor@, budget@, bac@, acctg@, treas@, admin@test.local
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Tests
+- `pnpm test` — unit (Vitest)
+- `pnpm test:db` — database (pgTAP)
+- `pnpm e2e` — end-to-end (Playwright; resets the local DB)
+  - On machines without a bundled Playwright Chromium (e.g. macOS 13), use installed Chrome instead: `PW_CHANNEL=chrome pnpm e2e` (`playwright.config.ts` reads `PW_CHANNEL` as the browser channel).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Production setup (shared Supabase project)
+1. Apply `supabase/migrations/*.sql` in filename order (never `seed.sql`).
+2. Dashboard → Project Settings → API → **Exposed schemas**: add `pr_tracker`.
+3. Dashboard → Authentication → Providers → **Google**: enabled (Client ID/secret from Google Cloud Console).
+4. Authentication → URL Configuration → add `https://<vercel-domain>/auth/callback` to Redirect URLs.
+5. Vercel env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_APP_URL=https://<vercel-domain>`.
+   **Do not** set `NEXT_PUBLIC_ENABLE_DEV_LOGIN`.
+6. Sign in as the super admin (berlcamp@gmail.com), then add offices and users under Admin.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Security notes
+- Only emails listed in Admin → Users can sign in, and only through Google (`app_settings.allowed_auth_providers`).
+- All writes go through `SECURITY DEFINER` functions; the audit table `pr_events` is append-only.
+- No Supabase Auth hooks or Realtime are used (the project is shared).
