@@ -19,11 +19,13 @@ Next.js 16 · Supabase (schema `pr_tracker`, shared project) · shadcn/ui · Tan
   - On machines without a bundled Playwright Chromium (e.g. macOS 13), use installed Chrome instead: `PW_CHANNEL=chrome pnpm e2e` (`playwright.config.ts` reads `PW_CHANNEL` as the browser channel).
 
 ## Production setup (shared Supabase project)
-1. Apply `supabase/migrations/*.sql` in filename order (never `seed.sql`).
+1. Apply `supabase/migrations/*.sql` **manually** (Dashboard SQL editor or `psql`), one file at a time in filename order.
+   The project is shared: **never** run `supabase db push`, `supabase db reset`, or `seed.sql` against it.
 2. Dashboard → Project Settings → API → **Exposed schemas**: add `pr_tracker`.
 3. Dashboard → Authentication → Providers → **Google**: enabled (Client ID/secret from Google Cloud Console).
 4. Authentication → URL Configuration → add `https://<vercel-domain>/auth/callback` to Redirect URLs.
 5. Vercel env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_APP_URL=https://<vercel-domain>`.
+   `NEXT_PUBLIC_APP_URL` is **required**: the QR codes on printed routing slips link to it.
    **Do not** set `NEXT_PUBLIC_ENABLE_DEV_LOGIN`.
 6. Sign in as the super admin (berlcamp@gmail.com), then add offices and users under Admin.
 

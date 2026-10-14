@@ -1,6 +1,5 @@
 "use client";
 import { useState } from "react";
-import { toast } from "sonner";
 import { AlertTriangle, ExternalLink, FileText, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,6 +10,7 @@ import { formatDateTime } from "@/lib/format";
 import { validateFile } from "@/lib/pr/files";
 import { uploadAttachment } from "@/lib/pr/upload-client";
 import { getAttachmentUrl } from "@/app/(app)/prs/actions";
+import { openSignedUrl } from "@/lib/pr/open-signed-url";
 
 export type PrDocument = { id: string; filename: string; created_at: string; uploader: { full_name: string } | null };
 
@@ -18,10 +18,8 @@ export function PrDocumentCard({ prId, doc, canUpload, maxMb }: { prId: string; 
   const [file, setFile] = useState<File | null>(null);
   const problem = file ? validateFile(file, maxMb, true) : null;
 
-  async function view() {
-    const res = await getAttachmentUrl(doc!.id);
-    if (!res.ok) return toast.error(res.error);
-    window.open(res.data, "_blank", "noopener");
+  function view() {
+    return openSignedUrl(() => getAttachmentUrl(doc!.id));
   }
 
   const uploadDialog = canUpload && (

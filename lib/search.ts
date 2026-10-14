@@ -13,7 +13,7 @@ const SIZES = [10, 25, 50, 100];
 
 export type ListParams = {
   page: number; size: number; sort: (typeof SORTABLE)[number]; dir: "asc" | "desc";
-  q: string; state: string; office: string; from: string; to: string; min: string; max: string;
+  q: string; state: string; office: string; origin: string; from: string; to: string; min: string; max: string;
 };
 
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
@@ -34,6 +34,7 @@ export function parseListParams(sp: Record<string, string | string[] | undefined
     q: one(sp.q).trim().slice(0, 100),
     state: STATES.includes(one(sp.state)) ? one(sp.state) : "",
     office: isUuid(one(sp.office)) ? one(sp.office) : "",
+    origin: isUuid(one(sp.origin)) ? one(sp.origin) : "",
     from: isDate(one(sp.from)) ? one(sp.from) : "",
     to: isDate(one(sp.to)) ? one(sp.to) : "",
     min: isNum(one(sp.min)) ? one(sp.min) : "",

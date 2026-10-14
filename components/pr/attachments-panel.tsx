@@ -2,7 +2,6 @@
 import { useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Download, Paperclip } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +13,7 @@ import { validateFile } from "@/lib/pr/files";
 import { uploadAttachment } from "@/lib/pr/upload-client";
 import { formatDateTime } from "@/lib/format";
 import { getAttachmentUrl } from "@/app/(app)/prs/actions";
+import { openSignedUrl } from "@/lib/pr/open-signed-url";
 import { supersedeAttachment } from "@/app/(app)/prs/[id]/actions";
 
 export type AttachmentItem = {
@@ -33,10 +33,8 @@ export function AttachmentsPanel({ prId, attachments, canUpload, myOfficeId, max
     return uploadAttachment(prId, file, maxMb, false);
   }
 
-  async function download(id: string) {
-    const res = await getAttachmentUrl(id);
-    if (!res.ok) return toast.error(res.error);
-    window.open(res.data, "_blank", "noopener");
+  function download(id: string) {
+    return openSignedUrl(() => getAttachmentUrl(id));
   }
 
   const columns: ColumnDef<AttachmentItem>[] = [

@@ -13,6 +13,7 @@ export default async function PrListPage({ searchParams }: { searchParams: Promi
   if (term) query = query.or(`routing_slip_no.ilike.*${term}*,pr_no.ilike.*${term}*,purpose.ilike.*${term}*`);
   if (p.state) query = query.eq("movement_state", p.state as never);
   if (p.office) query = query.eq("current_office_id", p.office);
+  if (p.origin) query = query.eq("origin_office_id", p.origin);
   if (p.from) query = query.gte("pr_date", p.from);
   if (p.to) query = query.lte("pr_date", p.to);
   if (p.min) query = query.gte("amount", Number(p.min));
