@@ -1,11 +1,10 @@
-import Link from "next/link";
-import { LogOut } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { GlobalSearch } from "./global-search";
+import { SignOutMenuItem } from "./sign-out-menu-item";
 import type { Profile } from "@/lib/types";
 
 export function Topbar({ profile, bell }: { profile: Profile; bell?: React.ReactNode }) {
@@ -25,7 +24,7 @@ export function Topbar({ profile, bell }: { profile: Profile; bell?: React.React
               <div className="text-xs text-muted-foreground">{profile.office?.name ?? profile.role.replace("_", " ")}</div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem asChild><Link href="/auth/signout"><LogOut className="mr-2 size-4" />Sign out</Link></DropdownMenuItem>
+            <SignOutMenuItem />
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
