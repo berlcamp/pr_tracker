@@ -35,9 +35,10 @@ export function NotificationBell() {
   }, [refresh]);
 
   async function openItem(n: NotificationViewRow) {
-    if (!n.is_read) await markNotificationsRead([n.id!]);
+    if (!n.is_read) await markNotificationsRead([n.id]);
     setOpen(false);
-    router.push(`/prs/${n.pr_id}`);
+    // A recalled forward leaves the recipient unable to open the PR; show its public tracking page instead.
+    router.push(n.can_view ? `/prs/${n.pr_id}` : `/track/${encodeURIComponent(n.routing_slip_no)}`);
     refresh();
   }
 
@@ -66,9 +67,9 @@ export function NotificationBell() {
               <li key={n.id}>
                 <button onClick={() => openItem(n)}
                         className={`w-full border-b px-4 py-3 text-left text-sm hover:bg-muted ${n.is_read ? "text-muted-foreground" : "bg-primary/5 font-medium"}`}>
-                  <div>{notificationText({ type: n.type as EventType, actor_office_name: n.actor_office_name, routing_slip_no: n.routing_slip_no! })}</div>
+                  <div>{notificationText({ type: n.type as EventType, actor_office_name: n.actor_office_name, routing_slip_no: n.routing_slip_no })}</div>
                   <div className="truncate text-xs font-normal text-muted-foreground">{n.purpose}</div>
-                  <div className="text-xs font-normal text-muted-foreground">{formatDateTime(n.created_at!)}</div>
+                  <div className="text-xs font-normal text-muted-foreground">{formatDateTime(n.created_at)}</div>
                 </button>
               </li>
             ))}

@@ -21,10 +21,12 @@ select ok(exists (select 1 from pg_policies where schemaname = 'storage' and tab
                    and policyname = 'pr_tracker_attachments_insert'), 'insert policy exists');
 
 -- PR document rules. Storage objects are inserted directly as postgres to simulate finished uploads.
-insert into storage.objects (bucket_id, name) values
-  ('pr-tracker-attachments', current_setting('tests.pr') || '/v1-pr.pdf'),
-  ('pr-tracker-attachments', current_setting('tests.pr') || '/v2-pr.pdf'),
-  ('pr-tracker-attachments', current_setting('tests.pr') || '/x-pr.docx');
+-- metadata mirrors what Storage writes after an upload (size + mimetype are verified by register_attachment).
+insert into storage.objects (bucket_id, name, metadata) values
+  ('pr-tracker-attachments', current_setting('tests.pr') || '/v1-pr.pdf', '{"size": 1000, "mimetype": "application/pdf"}'),
+  ('pr-tracker-attachments', current_setting('tests.pr') || '/v2-pr.pdf', '{"size": 1000, "mimetype": "application/pdf"}'),
+  ('pr-tracker-attachments', current_setting('tests.pr') || '/x-pr.docx',
+   '{"size": 1000, "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}');
 select tests.authenticate_as('sc@x.test');
 select lives_ok(format('select pr_tracker.register_attachment(%L, %L, %L, 1000, %L, true)', current_setting('tests.pr'),
                        current_setting('tests.pr') || '/v1-pr.pdf', 'pr.pdf', 'application/pdf'), 'origin uploads PR document');

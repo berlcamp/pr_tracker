@@ -74,13 +74,6 @@ export type Database = {
             foreignKeyName: "notification_reads_notification_id_fkey"
             columns: ["notification_id"]
             isOneToOne: false
-            referencedRelation: "my_notifications"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "notification_reads_notification_id_fkey"
-            columns: ["notification_id"]
-            isOneToOne: false
             referencedRelation: "notifications"
             referencedColumns: ["id"]
           },
@@ -810,36 +803,6 @@ export type Database = {
           },
         ]
       }
-      my_notifications: {
-        Row: {
-          actor_name: string | null
-          actor_office_name: string | null
-          created_at: string | null
-          id: number | null
-          is_read: boolean | null
-          pr_id: string | null
-          purpose: string | null
-          routing_slip_no: string | null
-          to_office_name: string | null
-          type: Database["pr_tracker"]["Enums"]["event_type"] | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "notifications_pr_id_fkey"
-            columns: ["pr_id"]
-            isOneToOne: false
-            referencedRelation: "pr_overview"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "notifications_pr_id_fkey"
-            columns: ["pr_id"]
-            isOneToOne: false
-            referencedRelation: "purchase_requests"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       pr_overview: {
         Row: {
           amount: number | null
@@ -1189,6 +1152,22 @@ export type Database = {
       is_involved: { Args: { p_pr_id: string }; Returns: boolean }
       is_super_admin: { Args: never; Returns: boolean }
       link_my_profile: { Args: never; Returns: Json }
+      list_my_notifications: {
+        Args: { p_limit?: number }
+        Returns: {
+          actor_name: string
+          actor_office_name: string
+          can_view: boolean
+          created_at: string
+          id: number
+          is_read: boolean
+          pr_id: string
+          purpose: string
+          routing_slip_no: string
+          to_office_name: string
+          type: Database["pr_tracker"]["Enums"]["event_type"]
+        }[]
+      }
       mark_all_notifications_read: { Args: never; Returns: undefined }
       mark_notifications_read: { Args: { p_ids: number[] }; Returns: undefined }
       recall_pr: {

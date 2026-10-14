@@ -7,7 +7,7 @@ export async function getNotifications(): Promise<{ unread: number; items: Notif
   const supabase = await createClient();
   const [count, list] = await Promise.all([
     supabase.rpc("unread_notification_count"),
-    supabase.from("my_notifications").select("*").order("id", { ascending: false }).limit(20),
+    supabase.rpc("list_my_notifications", { p_limit: 20 }),
   ]);
   return { unread: (count.data as number | null) ?? 0, items: list.data ?? [] };
 }
