@@ -92,6 +92,7 @@ begin
   perform pr_tracker._saao_line_book(p_node_id, v_mov.book_id);
   perform pr_tracker._saao_lock_book_shared(v_mov.book_id);
   if p_amount is null then raise exception 'An amount is required'; end if;
+  if p_amount <> 0 then perform pr_tracker._saao_require_live(p_node_id); end if;
   select * into v_old from pr_tracker.saao_movement_lines where movement_id = p_movement_id and node_id = p_node_id;
   if p_amount = 0 then
     delete from pr_tracker.saao_movement_lines where movement_id = p_movement_id and node_id = p_node_id;
@@ -119,6 +120,7 @@ begin
   perform pr_tracker._saao_lock_book_shared(v_book);
   if p_month is null or p_month < 1 or p_month > 12 then raise exception 'Month must be between 1 and 12'; end if;
   if p_amount is null then raise exception 'An amount is required'; end if;
+  if p_amount <> 0 or v_entry is not null then perform pr_tracker._saao_require_live(p_node_id); end if;
   select * into v_old from pr_tracker.saao_obligations where node_id = p_node_id and month = p_month for update;
   if p_amount = 0 and v_entry is null then
     delete from pr_tracker.saao_obligations where node_id = p_node_id and month = p_month;
@@ -150,6 +152,7 @@ begin
   perform pr_tracker._saao_lock_book_shared(v_book);
   if v_status not in ('pending', 'approved', 'cancelled') then raise exception 'Unknown status: %', v_status; end if;
   if p_amount is null then raise exception 'An amount is required'; end if;
+  perform pr_tracker._saao_require_live(p_node_id);
   if p_id is null then
     insert into pr_tracker.saao_allotments (node_id, amount, reference_no, allotment_date, status, remarks, created_by)
     values (p_node_id, p_amount, pr_tracker._clean(p_reference_no), p_allotment_date, v_status,
@@ -199,6 +202,7 @@ begin
     raise exception 'Unknown extra mode: %', p_mode;
   end if;
   if p_mode = 'amount' and p_amount is null then raise exception 'An amount is required'; end if;
+  if p_mode is not null then perform pr_tracker._saao_require_live(p_node_id); end if;
   select * into v_old from pr_tracker.saao_line_extras where node_id = p_node_id and field = p_field for update;
   if p_mode is null then
     delete from pr_tracker.saao_line_extras where node_id = p_node_id and field = p_field;

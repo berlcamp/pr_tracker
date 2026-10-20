@@ -1,5 +1,5 @@
 begin;
-select plan(63);
+select plan(75);
 
 select tests.make_user('rviewer@saao.test', 'CSWD');
 select tests.make_user('rencoder@saao.test', 'GSO');
@@ -77,6 +77,31 @@ select ok((select position('saao_books where id = v_report.book_id for update' i
   'finalize locks the book FOR UPDATE before the report');
 select throws_ok($$select pr_tracker.saao_update_node((select id from pr_tracker.saao_nodes where label = 'R-Grp'), '{"active": false}')$$,
   'P0001', 'Lines under this heading have figures; remove them before deactivating', 'heading over figures cannot be deactivated');
+-- inactive subtrees carry no figures, and nothing new goes under them
+select throws_ok($$select pr_tracker.saao_move_node((select id from pr_tracker.saao_nodes where label = 'R-L2'), (select id from pr_tracker.saao_nodes where label = 'R-OldGrp'), null)$$,
+  'P0001', 'This row is under an inactive heading; reactivate it first', 'cannot move a figure-bearing line under an inactive heading');
+select throws_ok($$select pr_tracker.saao_move_node((select id from pr_tracker.saao_nodes where label = 'R-Grp'), (select id from pr_tracker.saao_nodes where label = 'R-OldGrp'), null)$$,
+  'P0001', 'This row is under an inactive heading; reactivate it first', 'cannot move a subtree with figures under an inactive heading');
+select throws_ok($$select pr_tracker.saao_add_node((select id from pr_tracker.saao_books where fiscal_year = 2095), (select id from pr_tracker.saao_nodes where label = 'R-OldGrp'), null, 'line', 'R-New', null, null)$$,
+  'P0001', 'This row is under an inactive heading; reactivate it first', 'cannot add a line under an inactive heading');
+select throws_ok($$select pr_tracker.saao_set_movement_line((select id from pr_tracker.saao_movements where reference_no = 'R-APPR'), (select id from pr_tracker.saao_nodes where label = 'R-OldLine'), 10)$$,
+  'P0001', 'This row is under an inactive heading; reactivate it first', 'no movement line under an inactive heading');
+select throws_ok($$select pr_tracker.saao_set_obligation((select id from pr_tracker.saao_nodes where label = 'R-Gone'), 1, 10, null)$$,
+  'P0001', 'This row is under an inactive heading; reactivate it first', 'no obligation on an inactive line');
+select throws_ok($$select pr_tracker.saao_upsert_allotment(null, (select id from pr_tracker.saao_nodes where label = 'R-OldLine'), 10, null, '2095-01-01', null, null)$$,
+  'P0001', 'This row is under an inactive heading; reactivate it first', 'no allotment under an inactive heading');
+select throws_ok($$select pr_tracker.saao_set_extra((select id from pr_tracker.saao_nodes where label = 'R-OldLine'), 'cna_1', 'balance', null)$$,
+  'P0001', 'This row is under an inactive heading; reactivate it first', 'no extra under an inactive heading');
+select throws_ok($$select pr_tracker.saao_update_node((select id from pr_tracker.saao_nodes where label = 'R-Gone'), '{"appropriation": 5}')$$,
+  'P0001', 'This row is under an inactive heading; reactivate it first', 'no appropriation on an inactive line');
+select throws_ok($$select pr_tracker.saao_update_node((select id from pr_tracker.saao_nodes where label = 'R-OldLine'), '{"appropriation": 5}')$$,
+  'P0001', 'This row is under an inactive heading; reactivate it first', 'no appropriation under an inactive heading');
+select throws_ok($$select pr_tracker.saao_apply_batch((select id from pr_tracker.saao_books where fiscal_year = 2095), jsonb_build_array(
+    jsonb_build_object('op', 'obligation', 'node_id', (select id from pr_tracker.saao_nodes where label = 'R-OldLine'), 'month', 1, 'amount', 10))) $$,
+  'P0001', 'Row 1: This row is under an inactive heading; reactivate it first', 'batch obeys the same rule');
+select lives_ok($$select pr_tracker.saao_set_obligation((select id from pr_tracker.saao_nodes where label = 'R-OldLine'), 1, 0, null)$$, 'clearing a figure under an inactive heading is allowed');
+select lives_ok($$select pr_tracker.saao_update_node((select id from pr_tracker.saao_nodes where label = 'R-OldGrp'), '{"active": true}');
+                  select pr_tracker.saao_update_node((select id from pr_tracker.saao_nodes where label = 'R-OldGrp'), '{"active": false}')$$, 'reactivating a heading is allowed');
 
 -- ---------- draft ----------
 select isnt(pr_tracker.saao_create_draft((select id from pr_tracker.saao_books where fiscal_year = 2095), '2095-03-10'),

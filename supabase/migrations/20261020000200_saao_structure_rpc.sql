@@ -50,6 +50,29 @@ begin
 end $$;
 revoke all on function pr_tracker._saao_lock_book_shared(uuid) from public, anon, authenticated;
 
+-- True when the node and all its ancestors are active (true for null or a missing node).
+-- Reports leave out inactive subtrees, so figures may only be written to live rows, and no row
+-- may be added or moved under an inactive heading. Reactivating a heading stays allowed.
+create or replace function pr_tracker._saao_node_is_live(p_node_id uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  with recursive up as (
+    select n.id, n.parent_id, n.active from pr_tracker.saao_nodes n where n.id = p_node_id
+    union all
+    select n.id, n.parent_id, n.active from pr_tracker.saao_nodes n join up on n.id = up.parent_id
+  )
+  select coalesce(bool_and(up.active), true) from up
+$$;
+
+create or replace function pr_tracker._saao_require_live(p_node_id uuid)
+returns void language plpgsql stable security definer set search_path = '' as $$
+begin
+  if not pr_tracker._saao_node_is_live(p_node_id) then
+    raise exception 'This row is under an inactive heading; reactivate it first';
+  end if;
+end $$;
+revoke all on function pr_tracker._saao_node_is_live(uuid), pr_tracker._saao_require_live(uuid)
+  from public, anon, authenticated;
+
 create or replace function pr_tracker._saao_valid_account_code(p text)
 returns void language plpgsql immutable set search_path = '' as $$
 begin
@@ -238,6 +261,7 @@ begin
   perform pr_tracker._saao_lock_book_shared(p_book_id);
   if v_label is null then raise exception 'A label is required'; end if;
   perform pr_tracker._saao_valid_account_code(v_code);
+  perform pr_tracker._saao_require_live(p_parent_id);
   -- the node guard validates parent book/kind, classification headings and the kind check constraint
   insert into pr_tracker.saao_nodes (book_id, parent_id, sort_order, kind, label, account_code, classification_id)
   values (p_book_id, p_parent_id, 2147483647, p_kind, v_label, v_code, p_classification_id)
@@ -284,6 +308,10 @@ begin
      and (v_new.appropriation <> 0 or pr_tracker._saao_line_has_figures(p_id)) then
     raise exception 'This line has figures; remove them before deactivating';
   end if;
+  if v_new.appropriation <> 0 and v_new.appropriation is distinct from v_old.appropriation
+     and (not v_new.active or not pr_tracker._saao_node_is_live(v_old.parent_id)) then
+    raise exception 'This row is under an inactive heading; reactivate it first';
+  end if;
   -- inactive headings hide their whole subtree from reports, so no line under them may carry figures
   if v_old.kind <> 'line' and v_old.active and not v_new.active and exists (
     with recursive d as (
@@ -326,6 +354,8 @@ begin
     end if;
   end if;
   if p_after_id = p_id then raise exception 'A row cannot be placed after itself'; end if;
+  perform pr_tracker._saao_require_live(p_new_parent_id);
+
   perform pr_tracker._saao_place_node(p_id, p_new_parent_id, p_after_id);
   -- close the gap left behind when the parent changed
   if v_old.parent_id is distinct from p_new_parent_id then
