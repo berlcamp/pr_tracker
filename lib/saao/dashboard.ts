@@ -14,7 +14,8 @@ export function pickDefaultReport(reports: { id: string; status: string; cutoff_
   return best?.id ?? null;
 }
 
-export type SummaryCard = { key: string; label: string; centavos: number | null; pct?: number | null; provisional?: string };
+/** `provisional` lists the provisional rules a card's figure depends on, in display order. */
+export type SummaryCard = { key: string; label: string; centavos: number | null; pct?: number | null; provisional?: string[] };
 
 const linesOf = (rows: ReportRow[]): LineAmounts[] =>
   rows.flatMap((r) => (r.kind === "line" && r.amounts ? [r.amounts] : []));
@@ -24,17 +25,19 @@ export function summaryCards(rows: ReportRow[]): SummaryCard[] {
   const t = totalAmounts(linesOf(rows));
   return [
     { key: "appropriation", label: "Annual Appropriation", centavos: t.appropriation },
-    { key: "changes", label: "Budget Changes", centavos: t.totalChanges },
-    { key: "adjusted", label: "Adjusted Appropriation", centavos: t.adjusted },
+    // PROVISIONAL (R3) NTA in total changes; PROVISIONAL (R11) which movements count; PROVISIONAL (R12) movement dating
+    { key: "changes", label: "Budget Changes", centavos: t.totalChanges, provisional: ["R3", "R11", "R12"] },
+    { key: "adjusted", label: "Adjusted Appropriation", centavos: t.adjusted, provisional: ["R3", "R11", "R12"] },
     // PROVISIONAL (R5): allotment equals adjusted appropriation under 'equals_adjusted'
-    { key: "allotment", label: "Allotments", centavos: t.allotment, provisional: "R5" },
-    { key: "obligation", label: "Obligations", centavos: t.obligation },
-    // PROVISIONAL (R7): balance of appropriation = allotment − obligation
-    { key: "balanceAppropriation", label: "Balance of Appropriation", centavos: t.balanceAppropriation, provisional: "R7" },
-    // PROVISIONAL (R5): balance of allotment depends on the allotment figure
-    { key: "balanceAllotment", label: "Balance of Allotment", centavos: t.balanceAllotment, provisional: "R5" },
-    // PROVISIONAL (R9): null when adjusted <= 0
-    { key: "pct", label: "Obligation %", centavos: null, pct: obligationPct(t.obligation, t.adjusted) },
+    { key: "allotment", label: "Allotments", centavos: t.allotment, provisional: ["R5"] },
+    // PROVISIONAL (R6): the cutoff filter
+    { key: "obligation", label: "Obligations", centavos: t.obligation, provisional: ["R6"] },
+    // PROVISIONAL (R5, R7): balance of appropriation = allotment − obligation
+    { key: "balanceAppropriation", label: "Balance of Appropriation", centavos: t.balanceAppropriation, provisional: ["R5", "R7"] },
+    // PROVISIONAL (R5, R11): balance of allotment depends on the allotment figure and counted movements
+    { key: "balanceAllotment", label: "Balance of Allotment", centavos: t.balanceAllotment, provisional: ["R5", "R11"] },
+    // PROVISIONAL (R9): null when adjusted <= 0; PROVISIONAL (R11): the adjusted figure depends on counted movements
+    { key: "pct", label: "Obligation %", centavos: null, pct: obligationPct(t.obligation, t.adjusted), provisional: ["R9", "R11"] },
   ];
 }
 

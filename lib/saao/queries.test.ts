@@ -50,18 +50,47 @@ describe("toReportRow", () => {
   });
 });
 
+type Row = { seq: number; parent_seq: null; depth: number; kind: string; label: string; show_total: boolean };
+const makeRows = (n: number): Row[] =>
+  Array.from({ length: n }, (_, i) => ({ seq: i + 1, parent_seq: null, depth: 0, kind: "note", label: `r${i + 1}`, show_total: true }));
+
+/** A fake PostgREST table that caps every response at `cap` rows and reports `count` when asked. */
+function fakeTable(all: Row[], cap: number, count = all.length) {
+  const ranges: [number, number][] = [];
+  const counts: (string | undefined)[] = [];
+  const builder = {
+    select: (_cols: string, opts?: { count?: string }) => { counts.push(opts?.count); return builder; },
+    eq: () => builder, order: () => builder,
+    range: (from: number, to: number) => {
+      ranges.push([from, to]);
+      const data = all.slice(from, Math.min(to + 1, from + cap));
+      return Promise.resolve({ data, error: null, count: counts.at(-1) === "exact" ? count : null });
+    },
+  };
+  vi.mocked(createClient).mockResolvedValue({ from: () => builder } as never);
+  return { ranges, counts };
+}
+
 describe("paging past PostgREST max_rows", () => {
-  test("getReportRows reads every 1000-row page", async () => {
-    const all = Array.from({ length: 2345 }, (_, i) => ({ seq: i + 1, parent_seq: null, depth: 0, kind: "note", label: `r${i + 1}`, show_total: true }));
-    const ranges: [number, number][] = [];
-    const builder = {
-      select: () => builder, eq: () => builder, order: () => builder,
-      range: (from: number, to: number) => { ranges.push([from, to]); return Promise.resolve({ data: all.slice(from, to + 1), error: null }); },
-    };
-    vi.mocked(createClient).mockResolvedValue({ from: () => builder } as never);
+  test("getReportRows reads every 1000-row page until an empty page", async () => {
+    const { ranges, counts } = fakeTable(makeRows(2345), 1000);
     const rows = await getReportRows("r");
     expect(rows).toHaveLength(2345);
     expect(rows.at(-1)!.label).toBe("r2345");
-    expect(ranges).toEqual([[0, 999], [1000, 1999], [2000, 2999]]);
+    expect(ranges).toEqual([[0, 999], [1000, 1999], [2000, 2999], [2345, 3344]]);
+    expect(counts[0]).toBe("exact");
+  });
+
+  test("a server that caps pages at 500 still returns all 1,163 rows", async () => {
+    const { ranges } = fakeTable(makeRows(1163), 500);
+    const rows = await getReportRows("r");
+    expect(rows).toHaveLength(1163);
+    expect(rows.map((r) => r.seq)).toEqual(makeRows(1163).map((r) => r.seq));
+    expect(ranges).toEqual([[0, 999], [500, 1499], [1000, 1999], [1163, 2162]]);
+  });
+
+  test("a count mismatch throws instead of returning a partial snapshot", async () => {
+    fakeTable(makeRows(1163), 1000, 1200);
+    await expect(getReportRows("r")).rejects.toThrow(/1163 of 1200/);
   });
 });

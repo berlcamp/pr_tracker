@@ -51,9 +51,15 @@ describe("summaryCards", () => {
     expect(pct.pct).toBeCloseTo((totals.obligation / totals.adjusted) * 100, 10);
   });
 
-  test("marks allotment and both balances provisional", () => {
-    expect(cards.filter((c) => c.provisional).map((c) => [c.key, c.provisional])).toEqual([
-      ["allotment", "R5"], ["balanceAppropriation", "R7"], ["balanceAllotment", "R5"],
+  test("marks every card that depends on a provisional rule, with all its rule ids", () => {
+    expect(cards.filter((c) => c.provisional?.length).map((c) => [c.key, c.provisional])).toEqual([
+      ["changes", ["R3", "R11", "R12"]],
+      ["adjusted", ["R3", "R11", "R12"]],
+      ["allotment", ["R5"]],
+      ["obligation", ["R6"]],
+      ["balanceAppropriation", ["R5", "R7"]],
+      ["balanceAllotment", ["R5", "R11"]],
+      ["pct", ["R9", "R11"]],
     ]);
   });
 

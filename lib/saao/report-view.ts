@@ -28,6 +28,7 @@ export type ReportView = {
   acknowledged: FrozenMovement[];
   certifier: { name: string | null; title: string | null };
   supersededByVersion: number | null;
+  finalizedAt: string | null;
 };
 
 export async function loadReportView(id: string, role: SaaoRole): Promise<ReportView | null> {
@@ -70,5 +71,6 @@ export async function loadReportView(id: string, role: SaaoRole): Promise<Report
     cutoffLabel, rules, acknowledged: movements.filter((m) => ackIds.has(m.id)),
     certifier: { name: strOrNull(src.certifier_name), title: strOrNull(src.certifier_title) },
     supersededByVersion,
+    finalizedAt: report.finalized_at,
   };
 }

@@ -182,13 +182,16 @@ revoke all on function pr_tracker._saao_tree_rows(uuid), pr_tracker._saao_build_
 create or replace function pr_tracker.saao_create_draft(p_book_id uuid, p_cutoff date)
 returns uuid language plpgsql security definer set search_path = '' as $$
 declare v_actor pr_tracker.profiles := pr_tracker._saao_require('encoder');
-        v_cutoff date; v_id uuid; v_version int;
+        v_cutoff date; v_id uuid; v_version int; v_fy int;
 begin
   if p_cutoff is null then raise exception 'Cutoff date is required'; end if;
   v_cutoff := (date_trunc('month', p_cutoff::timestamp) + interval '1 month - 1 day')::date;
   -- serialise report creation per book
-  perform 1 from pr_tracker.saao_books where id = p_book_id for update;
+  select fiscal_year into v_fy from pr_tracker.saao_books where id = p_book_id for update;
   if not found then raise exception 'Budget book not found'; end if;
+  if extract(year from v_cutoff) <> v_fy then
+    raise exception 'The cutoff must be within the book''s fiscal year';
+  end if;
   select id into v_id from pr_tracker.saao_reports
    where book_id = p_book_id and cutoff_date = v_cutoff and status = 'draft';
   if v_id is not null then return v_id; end if;
@@ -213,6 +216,8 @@ begin
   select * into v_old from pr_tracker.saao_reports where id = p_report_id for update;
   if v_old.id is null then raise exception 'Report not found'; end if;
   if v_old.status <> 'draft' then raise exception 'Only a draft can be deleted'; end if;
+  -- a revision draft was started by a finalizer; only a finalizer may abandon it
+  if v_old.revision_of is not null then perform pr_tracker._saao_require('finalizer'); end if;
   delete from pr_tracker.saao_reports where id = p_report_id;  -- drafts never hold rows
   perform pr_tracker._saao_audit(v_old.book_id, v_actor.id, 'report', p_report_id, 'delete_draft',
     to_jsonb(v_old), null);
@@ -334,11 +339,16 @@ end $$;
 -- normalised to month end, as saao_create_draft does.
 create or replace function pr_tracker.saao_live_rows(p_book_id uuid, p_cutoff date)
 returns setof jsonb language plpgsql stable security definer set search_path = '' as $$
-declare v_cutoff date;
+declare v_cutoff date; v_fy int;
 begin
   perform pr_tracker._saao_require('encoder');
   if p_cutoff is null then raise exception 'Cutoff date is required'; end if;
   v_cutoff := (date_trunc('month', p_cutoff::timestamp) + interval '1 month - 1 day')::date;
+  select fiscal_year into v_fy from pr_tracker.saao_books where id = p_book_id;
+  if not found then raise exception 'Budget book not found'; end if;
+  if extract(year from v_cutoff) <> v_fy then
+    raise exception 'The cutoff must be within the book''s fiscal year';
+  end if;
   return query
   select to_jsonb(r) - 'report_id' from pr_tracker._saao_build_rows(null, p_book_id, v_cutoff) r order by r.seq;
 end $$;

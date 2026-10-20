@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireSaao } from "@/lib/saao/access";
 import { endingBalanceMatrix } from "@/lib/saao/ending-balance";
-import { basisLines } from "@/lib/saao/basis";
+import { basisLines, reportStatusLines } from "@/lib/saao/basis";
 import { formatAmount, formatPct } from "@/lib/saao/money";
 import { loadReportView } from "@/lib/saao/report-view";
 import { rollup } from "@/lib/saao/rollup";
@@ -32,7 +32,7 @@ export default async function PrintSaaoPage({ params, searchParams }: Props) {
   const { sheet } = await searchParams;
   const v = await loadReportView(id, role);
   if (!v) notFound();
-  const isDraft = v.status === "draft";
+  const status = reportStatusLines(v);
   const ending = sheet === "ending-balance";
   const columns = saaoColumns(sbNumbersOf(v.rows), v.labels);
   const display = ending ? [] : rollup(v.rows);
@@ -43,13 +43,14 @@ export default async function PrintSaaoPage({ params, searchParams }: Props) {
       <style>{CSS}</style>
       <PrintToolbar backHref={`/budget/history/${id}`} />
       <div className="saao-print p-3">
-        {isDraft && <div className="saao-watermark" aria-hidden>DRAFT</div>}
+        {status.watermark && <div className="saao-watermark" aria-hidden>{status.watermark}</div>}
         <header style={{ textAlign: "center", marginBottom: 6 }}>
           {v.headerLines.map((l, i) => <div key={i}>{l}</div>)}
           <div style={{ fontWeight: 700, fontSize: "10pt" }}>{ending ? "SUMMARY OF ENDING BALANCE" : "STATUS OF APPROPRIATION, ALLOTMENT & OBLIGATION"}</div>
           <div>{v.fundName} · FY {v.fiscalYear}</div>
           <div>As of {v.cutoffLabel}</div>
-          {isDraft && <div style={{ fontWeight: 700 }}>DRAFT — NOT OFFICIAL</div>}
+          {status.finalized && <div>{status.finalized}</div>}
+          {status.banner && <div style={{ fontWeight: 700 }}>{status.banner}</div>}
         </header>
 
         {m ? (

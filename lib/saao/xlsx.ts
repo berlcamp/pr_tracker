@@ -1,6 +1,7 @@
 // Excel builders (spec §8.9). Values only, never formulas, so the file shows exactly the app's figures.
 import ExcelJS from "exceljs";
 import type { SaaoColumn } from "@/components/saao/columns";
+import { reportStatusLines } from "./basis";
 import type { EndingBalanceMatrix } from "./ending-balance";
 import { toPeso } from "./money";
 import type { DisplayRow } from "./rollup";
@@ -12,14 +13,16 @@ export type XlsxHeader = {
   asOf: string;
   status: "draft" | "finalized" | "superseded";
   version: number;
+  finalizedAt?: string | null;
+  supersededByVersion?: number | null;
 };
 
-export type SaaoWorkbookInput = {
+export type XlsxFooter = { basis: string[]; certifier: { name: string | null; title: string | null } };
+
+export type SaaoWorkbookInput = XlsxFooter & {
   header: XlsxHeader;
   rows: DisplayRow[];
   columns: SaaoColumn[];
-  basis: string[];
-  certifier: { name: string | null; title: string | null };
 };
 
 const NUM_FMT = "#,##0.00;-#,##0.00";
@@ -36,15 +39,18 @@ function writeHeader(ws: ExcelJS.Worksheet, h: XlsxHeader, width: number): numbe
     c.alignment = { horizontal: "center" };
     r += 1;
   };
-  if (h.status === "draft") merged("DRAFT — NOT OFFICIAL", true, 12);
+  const status = reportStatusLines(h);
+  if (status.banner) merged(status.banner, true, 12);
   for (const l of h.lines) merged(l);
   merged(h.title, true, 11);
   merged(h.fund);
   merged(h.asOf);
+  if (status.finalized) merged(status.finalized, true);
   return r + 1;
 }
 
-function writeFooter(ws: ExcelJS.Worksheet, start: number, basis: string[], certifier: SaaoWorkbookInput["certifier"], width: number): void {
+/** Basis of figures (with acknowledged unapproved movements) and the certification block; returns the next free row. */
+function writeFooter(ws: ExcelJS.Worksheet, start: number, { basis, certifier }: XlsxFooter, width: number): number {
   let r = start;
   const text = (t: string, bold = false) => {
     ws.mergeCells(r, 1, r, width);
@@ -64,6 +70,7 @@ function writeFooter(ws: ExcelJS.Worksheet, start: number, basis: string[], cert
   // never invent a signatory: blank when the book has none
   text(certifier.name ?? "", true);
   text(certifier.title ?? "");
+  return r;
 }
 
 export function buildSaaoWorkbook(input: SaaoWorkbookInput): ExcelJS.Workbook {
@@ -110,11 +117,11 @@ export function buildSaaoWorkbook(input: SaaoWorkbookInput): ExcelJS.Workbook {
     }
     r += 1;
   }
-  writeFooter(ws, r + 1, basis, certifier, width);
+  writeFooter(ws, r + 1, { basis, certifier }, width);
   return wb;
 }
 
-export function buildEndingBalanceWorkbook(m: EndingBalanceMatrix, header: XlsxHeader): ExcelJS.Workbook {
+export function buildEndingBalanceWorkbook(m: EndingBalanceMatrix, header: XlsxHeader, footer: XlsxFooter): ExcelJS.Workbook {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Ending Balance", { pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
   const width = 2 + m.classes.length;
@@ -150,7 +157,7 @@ export function buildEndingBalanceWorkbook(m: EndingBalanceMatrix, header: XlsxH
   let r = headRow + 1;
   for (const s of m.sections) put(r++, s.label, s.byClass, s.total, false);
   put(r++, "GRAND TOTAL", m.columnTotals, m.grand, true);
-  r += 1;
+  r = writeFooter(ws, r + 1, footer, width) + 1;
   // AWAITING BUDGET OFFICE (R15)
   ws.mergeCells(r, 1, r, width);
   ws.getCell(r, 1).value = "Balance of Allotment by section and classification. The Summary of Ending Balance grouping is unconfirmed (R15).";

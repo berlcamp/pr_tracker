@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import type { ActionResult } from "@/lib/actions/rpc";
 import { applyLocalEdit, type LocalEdit } from "@/lib/saao/editor-state";
 import type { EditorData } from "@/lib/saao/queries";
+import { useUnsavedGuard } from "./use-unsaved-guard";
 
 type PendingEdit = { id: number; edit: LocalEdit; done: boolean };
 
@@ -50,5 +51,9 @@ export function usePendingEdits(data: EditorData) {
     return res;
   }, [addPending, settle]);
 
-  return { live, saving: pending.some((p) => !p.done), addPending, settle, run };
+  const saving = pending.some((p) => !p.done);
+  // an edit still saving would be lost if the user left now
+  useUnsavedGuard(saving);
+
+  return { live, saving, addPending, settle, run };
 }

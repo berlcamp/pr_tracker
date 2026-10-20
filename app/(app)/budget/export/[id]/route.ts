@@ -24,12 +24,14 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
     asOf: `As of ${v.cutoffLabel}`,
     status: v.status,
     version: v.version,
+    finalizedAt: v.finalizedAt,
+    supersededByVersion: v.supersededByVersion,
   };
+  const footer = { basis: basisLines(v.rules, v.acknowledged), certifier: v.certifier };
   const wb = sheet === "ending-balance"
-    ? buildEndingBalanceWorkbook(endingBalanceMatrix(v.rows), header)
+    ? buildEndingBalanceWorkbook(endingBalanceMatrix(v.rows), header, footer)
     : buildSaaoWorkbook({
-        header, rows: rollup(v.rows), columns: saaoColumns(sbNumbersOf(v.rows), v.labels),
-        basis: basisLines(v.rules, v.acknowledged), certifier: v.certifier,
+        header, rows: rollup(v.rows), columns: saaoColumns(sbNumbersOf(v.rows), v.labels), ...footer,
       });
   const buf = await wb.xlsx.writeBuffer();
   const prefix = sheet === "ending-balance" ? "Ending-Balance" : "SAAO";

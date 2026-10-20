@@ -54,6 +54,23 @@ describe("buildSaaoWorkbook", () => {
     expect(d.getCell("A1").value).toBe("DRAFT — NOT OFFICIAL");
   });
 
+  test("finalized header states the version and finalized date (Asia/Manila)", () => {
+    const f = buildSaaoWorkbook({ ...input, header: { ...header, finalizedAt: "2026-11-04T17:30:00Z" } }).getWorksheet("SAAO")!;
+    const texts: unknown[] = [];
+    f.eachRow((row) => texts.push(row.getCell(1).value));
+    expect(texts).toContain("Finalized v1 — Nov 5, 2026");
+    expect(texts.some((t) => String(t).startsWith("SUPERSEDED"))).toBe(false);
+  });
+
+  test("a superseded header writes the SUPERSEDED line", () => {
+    const sh = { ...header, status: "superseded" as const, finalizedAt: "2026-11-04T01:00:00Z", supersededByVersion: 2 };
+    const f = buildSaaoWorkbook({ ...input, header: sh }).getWorksheet("SAAO")!;
+    expect(f.getCell("A1").value).toBe("SUPERSEDED by v2 — not the current official report");
+    const texts: unknown[] = [];
+    f.eachRow((row) => texts.push(row.getCell(1).value));
+    expect(texts).toContain("Finalized v1 — Nov 4, 2026");
+  });
+
   test("null certifier leaves the lines blank", async () => {
     const w = buildSaaoWorkbook({ ...input, certifier: { name: null, title: null } });
     expect((await w.xlsx.writeBuffer()).byteLength).toBeGreaterThan(0);
@@ -63,11 +80,32 @@ describe("buildSaaoWorkbook", () => {
 describe("buildEndingBalanceWorkbook", () => {
   test("writes sections and a numeric grand total", async () => {
     const m = endingBalanceMatrix(rows);
-    const wb = buildEndingBalanceWorkbook(m, header);
+    const wb = buildEndingBalanceWorkbook(m, header, { basis: [], certifier: { name: null, title: null } });
     const ws = wb.worksheets[0];
     let found: unknown;
     ws.eachRow((row) => { if (row.getCell(1).value === "GRAND TOTAL") found = row.getCell(2 + m.classes.length).value; });
     expect(found).toBe(m.grand / 100);
     expect((await wb.xlsx.writeBuffer()).byteLength).toBeGreaterThan(0);
+  });
+
+  test("writes the same footer as the SAAO sheet, then the R15 note", () => {
+    const m = endingBalanceMatrix(rows);
+    const basis = ["Rule line one.", "Unapproved movements counted (acknowledged at finalization):", "SB-9 — Test (pending): 1.00"];
+    const ws = buildEndingBalanceWorkbook(m, header, { basis, certifier: { name: "Jane Doe", title: "City Budget Officer" } }).worksheets[0];
+    const texts: unknown[] = [];
+    ws.eachRow((row) => texts.push(row.getCell(1).value));
+    const at = (t: string) => texts.indexOf(t);
+    for (const t of ["Basis of figures", ...basis, "Certified Correct:", "Jane Doe", "City Budget Officer"]) expect(texts).toContain(t);
+    expect(at("Basis of figures")).toBeGreaterThan(at("GRAND TOTAL"));
+    const r15 = texts.findIndex((t) => String(t).includes("(R15)"));
+    expect(r15).toBeGreaterThan(at("City Budget Officer"));
+  });
+
+  test("null certifier leaves the signatory lines blank", () => {
+    const ws = buildEndingBalanceWorkbook(endingBalanceMatrix(rows), header, { basis: [], certifier: { name: null, title: null } }).worksheets[0];
+    const texts: unknown[] = [];
+    ws.eachRow((row) => texts.push(row.getCell(1).value));
+    expect(texts).toContain("Certified Correct:");
+    expect(texts).not.toContain("Jane Doe");
   });
 });

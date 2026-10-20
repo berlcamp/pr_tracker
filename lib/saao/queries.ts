@@ -16,15 +16,29 @@ const num = (v: unknown) => fromNumeric(v as Num);
 /** PostgREST caps every response at max_rows (1000 in supabase/config.toml and Supabase's default). */
 const PAGE = 1000;
 
-/** Reads every page of an ordered query; `page(from, to)` must apply a stable order and .range(from, to). */
-async function fetchAll<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
+type Page<T> = { data: T[] | null; error: { message: string } | null; count?: number | null };
+
+/**
+ * Reads every page of an ordered query; `page(from, to, first)` must apply a stable order and
+ * .range(from, to). Pages until an empty page comes back and advances by the rows actually
+ * received, so a server whose max_rows is below PAGE never truncates silently. When the first
+ * page carries an exact count (request it with `first`), the collected rows must match it.
+ */
+async function fetchAll<T>(page: (from: number, to: number, first: boolean) => PromiseLike<Page<T>>): Promise<T[]> {
   const out: T[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await page(from, from + PAGE - 1);
+  let expected: number | null = null;
+  for (let from = 0; ; ) {
+    const { data, error, count } = await page(from, from + PAGE - 1, from === 0);
     if (error) throw new Error(error.message);
-    out.push(...(data ?? []));
-    if (!data || data.length < PAGE) return out;
+    if (from === 0 && count != null) expected = count;
+    if (!data || data.length === 0) break;
+    out.push(...data);
+    from += data.length;
   }
+  if (expected != null && out.length !== expected) {
+    throw new Error(`Incomplete read: got ${out.length} of ${expected} rows. Reload the page.`);
+  }
+  return out;
 }
 
 /** Maps a snapshot row / saao_live_rows element (snake_case, numerics as string or number) to a ReportRow in centavos. */
@@ -89,8 +103,10 @@ export async function getReport(id: string): Promise<SaaoReportRow | null> {
 /** Snapshot rows of a report in tree order. */
 export async function getReportRows(reportId: string): Promise<ReportRow[]> {
   const supabase = await createClient();
-  const rows = await fetchAll((from, to) =>
-    supabase.from("saao_report_rows").select("*").eq("report_id", reportId).order("seq").range(from, to));
+  // an official snapshot must never show partial totals: the first page asks for an exact count
+  const rows = await fetchAll((from, to, first) =>
+    supabase.from("saao_report_rows").select("*", first ? { count: "exact" } : undefined)
+      .eq("report_id", reportId).order("seq").range(from, to));
   return rows.map(toReportRow);
 }
 

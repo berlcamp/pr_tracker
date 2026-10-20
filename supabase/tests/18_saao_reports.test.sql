@@ -1,5 +1,5 @@
 begin;
-select plan(75);
+select plan(78);
 
 select tests.make_user('rviewer@saao.test', 'CSWD');
 select tests.make_user('rencoder@saao.test', 'GSO');
@@ -213,6 +213,10 @@ select is((select sum((r ->> 'adjusted')::numeric)::text || '|' || sum((r ->> 'o
   '12799.00|877.00', 'live rows reflect the edits');
 select throws_ok($$select pr_tracker.saao_create_draft((select id from pr_tracker.saao_books where fiscal_year = 2095), '2095-03-15')$$,
   'P0001', 'This month is already finalized; start a revision instead', 'cannot draft a finalized month');
+select throws_ok($$select pr_tracker.saao_create_draft((select id from pr_tracker.saao_books where fiscal_year = 2095), '2096-01-31')$$,
+  'P0001', 'The cutoff must be within the book''s fiscal year', 'draft cutoff must be in the fiscal year');
+select throws_ok($$select pr_tracker.saao_live_rows((select id from pr_tracker.saao_books where fiscal_year = 2095), '2094-12-31')$$,
+  'P0001', 'The cutoff must be within the book''s fiscal year', 'live cutoff must be in the fiscal year');
 select throws_ok($$select pr_tracker.saao_delete_draft((select id from pr_tracker.saao_reports))$$,
   'P0001', 'Only a draft can be deleted', 'cannot delete a finalized report');
 -- a draft for another month can be deleted
@@ -230,6 +234,12 @@ select throws_ok($$select pr_tracker.saao_start_revision((select id from pr_trac
   'P0001', 'A revision of this month is already in progress', 'only one revision at a time');
 select is((select version || '|' || status || '|' || (revision_of = (select id from pr_tracker.saao_reports where version = 1))::text || '|' || revision_reason
   from pr_tracker.saao_reports where version = 2), '2|draft|true|Corrected appropriation', 'v2 draft created');
+select tests.clear_authentication();
+select tests.authenticate_as('rencoder@saao.test');
+select throws_ok($$select pr_tracker.saao_delete_draft((select id from pr_tracker.saao_reports where version = 2))$$,
+  'P0001', 'Your budget role does not allow this', 'an encoder cannot delete a revision draft');
+select tests.clear_authentication();
+select tests.authenticate_as('rfinalizer@saao.test');
 select lives_ok($$select pr_tracker.saao_finalize((select id from pr_tracker.saao_reports where version = 2),
   array[(select id from pr_tracker.saao_movements where reference_no = 'R-PEND')])$$, 'v2 finalized');
 select is((select string_agg(version || ':' || status, ',' order by version) from pr_tracker.saao_reports),
