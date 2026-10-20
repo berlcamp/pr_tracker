@@ -76,6 +76,9 @@ begin
   raise exception 'A finalized report cannot be changed';
 end $$;
 
+-- Trigger functions fire without EXECUTE; nobody calls them directly.
+revoke execute on function pr_tracker._saao_report_guard() from public, anon, authenticated;
+
 create trigger saao_reports_guard before update or delete on pr_tracker.saao_reports
   for each row execute function pr_tracker._saao_report_guard();
 
@@ -90,6 +93,8 @@ begin
   end if;
   raise exception 'Report snapshots cannot be changed';
 end $$;
+
+revoke execute on function pr_tracker._saao_report_rows_guard() from public, anon, authenticated;
 
 create trigger saao_report_rows_guard before insert or update or delete on pr_tracker.saao_report_rows
   for each row execute function pr_tracker._saao_report_rows_guard();

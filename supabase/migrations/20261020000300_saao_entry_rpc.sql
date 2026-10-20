@@ -16,6 +16,7 @@ begin
   end if;
   return v.book_id;
 end $$;
+revoke execute on function pr_tracker._saao_line_book(uuid, uuid) from public, anon, authenticated;
 
 -- ---------- movements ----------
 create or replace function pr_tracker.saao_upsert_movement(
@@ -279,6 +280,16 @@ begin
   return v_i;
 end $$;
 
+revoke execute on function
+  pr_tracker.saao_upsert_movement(uuid, uuid, text, int, text, text, date, text, text, text),
+  pr_tracker.saao_delete_movement(uuid),
+  pr_tracker.saao_set_movement_line(uuid, uuid, numeric),
+  pr_tracker.saao_set_obligation(uuid, int, numeric, text),
+  pr_tracker.saao_upsert_allotment(uuid, uuid, numeric, text, date, text, text),
+  pr_tracker.saao_delete_allotment(uuid),
+  pr_tracker.saao_set_extra(uuid, text, text, numeric),
+  pr_tracker.saao_apply_batch(uuid, jsonb)
+  from public, anon;
 grant execute on function
   pr_tracker.saao_upsert_movement(uuid, uuid, text, int, text, text, date, text, text, text),
   pr_tracker.saao_delete_movement(uuid),

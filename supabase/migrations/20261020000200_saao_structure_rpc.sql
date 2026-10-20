@@ -10,6 +10,7 @@ returns boolean language sql stable security definer set search_path = '' as $$
       or exists (select 1 from pr_tracker.saao_allotments where node_id = p_node_id)
       or exists (select 1 from pr_tracker.saao_line_extras where node_id = p_node_id)
 $$;
+revoke execute on function pr_tracker._saao_line_has_figures(uuid) from public, anon, authenticated;
 
 -- Places p_node under p_parent after sibling p_after (last when null) and renumbers siblings 10, 20, 30...
 -- Tree order is sort_order, created_at, id (R-A).
@@ -39,6 +40,7 @@ begin
    where n.id = s.id;
   drop table pg_temp.saao_sibs;
 end $$;
+revoke execute on function pr_tracker._saao_place_node(uuid, uuid, uuid) from public, anon, authenticated;
 
 -- Every RPC that writes figures or structure of a book takes this share lock first, so
 -- saao_finalize (which takes the book row FOR UPDATE) sees one consistent state of the book.
@@ -80,6 +82,7 @@ begin
     raise exception 'Account code must look like 5-02-03-010';
   end if;
 end $$;
+revoke execute on function pr_tracker._saao_valid_account_code(text) from public, anon, authenticated;
 
 -- ---------- access ----------
 create or replace function pr_tracker.saao_set_access(p_profile_id uuid, p_role text)
@@ -386,6 +389,17 @@ begin
   perform pr_tracker._saao_audit(v_old.book_id, v_actor.id, 'node', p_id, 'delete', to_jsonb(v_old), null);
 end $$;
 
+revoke execute on function
+  pr_tracker.saao_set_access(uuid, text),
+  pr_tracker.saao_upsert_fund(uuid, text, text, boolean),
+  pr_tracker.saao_upsert_classification(uuid, text, text, int, boolean),
+  pr_tracker.saao_create_book(int, uuid, text, uuid, boolean),
+  pr_tracker.saao_update_book(uuid, jsonb),
+  pr_tracker.saao_add_node(uuid, uuid, uuid, text, text, text, uuid),
+  pr_tracker.saao_update_node(uuid, jsonb),
+  pr_tracker.saao_move_node(uuid, uuid, uuid),
+  pr_tracker.saao_delete_node(uuid)
+  from public, anon;
 grant execute on function
   pr_tracker.saao_set_access(uuid, text),
   pr_tracker.saao_upsert_fund(uuid, text, text, boolean),

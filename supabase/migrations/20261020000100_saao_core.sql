@@ -91,6 +91,8 @@ begin
   end if;
   return new;
 end $$;
+-- Trigger functions fire without EXECUTE; nobody calls them directly.
+revoke execute on function pr_tracker._saao_nodes_guard() from public, anon, authenticated;
 
 create trigger saao_nodes_guard before insert or update on pr_tracker.saao_nodes
   for each row execute function pr_tracker._saao_nodes_guard();
@@ -212,9 +214,16 @@ returns void language sql security definer set search_path = '' as $$
   values (p_book_id, p_actor_id, p_entity, p_entity_id, p_action, p_before, p_after)
 $$;
 
+-- New functions are executable by PUBLIC by default; the schema-level default-privilege
+-- revoke does not remove that, so every function is revoked explicitly.
 -- RLS policies call these as the signed-in user; _saao_require and _saao_audit stay internal.
+revoke execute on function pr_tracker.saao_role(), pr_tracker._saao_rank(text), pr_tracker.saao_my_access()
+  from public, anon;
 grant execute on function pr_tracker.saao_role(), pr_tracker._saao_rank(text), pr_tracker.saao_my_access()
   to authenticated;
+revoke execute on function pr_tracker._saao_require(text),
+  pr_tracker._saao_audit(uuid, uuid, text, uuid, text, jsonb, jsonb)
+  from public, anon, authenticated;
 
 -- ---------- RLS: read-only ----------
 alter table pr_tracker.saao_funds enable row level security;
