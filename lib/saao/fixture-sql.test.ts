@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { OUTPUT_PATH, buildFixtureSql } from "../../scripts/saao/fixture-to-sql.ts";
+import { OUTPUT_PATH, buildFixtureSql } from "../../scripts/saao/fixture-to-sql";
 import { basic } from "./fixtures";
 
 describe("generated pgTAP parity test", () => {

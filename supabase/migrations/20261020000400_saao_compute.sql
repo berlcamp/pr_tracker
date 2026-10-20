@@ -84,7 +84,7 @@ begin
   ),
   calc as (
     select b.*,
-      b.nta + b.supplemental + b.realignment as total_changes,  -- PROVISIONAL (R3): NTA included in Total Changes
+      b.nta + b.supplemental + b.realignment as total_changes,  -- PROVISIONAL (R3): NTA inclusion mirrors NTA_IN_TOTAL_CHANGES in lib/saao/rules.ts; both must change together
       b.appropriation + b.nta + b.supplemental + b.realignment as adjusted  -- R4
     from base b
   ),
