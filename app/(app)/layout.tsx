@@ -13,7 +13,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <SidebarProvider>
       <AppSidebar profile={profile} />
-      <SidebarInset>
+      <SidebarInset className="min-w-0">
         <Topbar profile={profile} avatarUrl={meta?.avatar_url ?? meta?.picture ?? null}
                 bell={profile.office ? <NotificationBell /> : null} />
         <main className="flex-1 space-y-6 p-4 md:p-6">{children}</main>
