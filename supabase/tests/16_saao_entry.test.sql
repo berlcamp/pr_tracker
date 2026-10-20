@@ -73,7 +73,7 @@ select throws_ok($$select pr_tracker.saao_delete_movement((select id from pr_tra
   'P0001', 'Remove the movement lines first', 'movement with lines cannot be deleted');
 select lives_ok($$select pr_tracker.saao_set_movement_line((select id from pr_tracker.saao_movements where reference_no = 'SB-1'),
   (select id from pr_tracker.saao_nodes where label = 'E-L1'), 0)$$, 'zero amount accepted');
-select is((select count(*)::int from pr_tracker.saao_movement_lines), 0, 'zero removes the movement line row');
+select is((select count(*)::int from pr_tracker.saao_movement_lines where node_id in (select n.id from pr_tracker.saao_nodes n join pr_tracker.saao_books b on b.id = n.book_id where b.fiscal_year >= 2090)), 0, 'zero removes the movement line row');
 select lives_ok($$select pr_tracker.saao_delete_movement((select id from pr_tracker.saao_movements where title = 'Other book'))$$, 'empty movement deletes');
 
 -- obligations
@@ -83,7 +83,7 @@ select throws_ok($$select pr_tracker.saao_set_obligation((select id from pr_trac
   'P0001', 'Figures can only be entered on account lines', 'obligation on a heading rejected');
 select lives_ok($$select pr_tracker.saao_set_obligation((select id from pr_tracker.saao_nodes where label = 'E-L1'), 1, 500, 'ORS-1')$$, 'obligation set');
 select lives_ok($$select pr_tracker.saao_set_obligation((select id from pr_tracker.saao_nodes where label = 'E-L1'), 1, 0, null)$$, 'obligation zeroed');
-select is((select count(*)::int from pr_tracker.saao_obligations), 0, 'zero obligation with no entry deletes the row');
+select is((select count(*)::int from pr_tracker.saao_obligations where node_id in (select n.id from pr_tracker.saao_nodes n join pr_tracker.saao_books b on b.id = n.book_id where b.fiscal_year >= 2090)), 0, 'zero obligation with no entry deletes the row');
 
 -- allotments (allotment_mode = recorded on 2093; equals_adjusted books accept them too, mode only affects reports)
 select throws_ok($$select pr_tracker.saao_upsert_allotment(null, (select id from pr_tracker.saao_nodes where label = 'E-L1'), 10, null, null, 'weird', null)$$,
@@ -111,9 +111,9 @@ select throws_ok($$select pr_tracker.saao_set_extra((select id from pr_tracker.s
   'P0001', 'An amount is required', 'amount mode needs an amount');
 select lives_ok($$select pr_tracker.saao_set_extra((select id from pr_tracker.saao_nodes where label = 'E-L1'), 'cna_1', 'amount', 75)$$, 'extra amount set');
 select lives_ok($$select pr_tracker.saao_set_extra((select id from pr_tracker.saao_nodes where label = 'E-L1'), 'cna_1', 'balance', 75)$$, 'extra switched to balance');
-select is((select amount is null from pr_tracker.saao_line_extras), true, 'balance mode stores no amount');
+select is((select amount is null from pr_tracker.saao_line_extras where node_id in (select n.id from pr_tracker.saao_nodes n join pr_tracker.saao_books b on b.id = n.book_id where b.fiscal_year >= 2090)), true, 'balance mode stores no amount');
 select lives_ok($$select pr_tracker.saao_set_extra((select id from pr_tracker.saao_nodes where label = 'E-L1'), 'cna_1', null, null)$$, 'null mode deletes');
-select is((select count(*)::int from pr_tracker.saao_line_extras), 0, 'extra row gone');
+select is((select count(*)::int from pr_tracker.saao_line_extras where node_id in (select n.id from pr_tracker.saao_nodes n join pr_tracker.saao_books b on b.id = n.book_id where b.fiscal_year >= 2090)), 0, 'extra row gone');
 
 -- _saao_line_has_figures through each source, observed via saao_delete_node
 select lives_ok($$select pr_tracker.saao_set_movement_line((select id from pr_tracker.saao_movements where reference_no = 'SB-1'), (select id from pr_tracker.saao_nodes where label = 'E-L2'), 5)$$, 'figure via movement line');
@@ -131,14 +131,14 @@ select throws_ok($$select pr_tracker.saao_delete_node((select id from pr_tracker
   'P0001', 'This line has figures and cannot be deleted', 'extra counts as figures');
 
 -- ---------- batch ----------
-select is((select count(*)::int from pr_tracker.saao_obligations), 1, 'baseline: one obligation (E-L3)');
+select is((select count(*)::int from pr_tracker.saao_obligations where node_id in (select n.id from pr_tracker.saao_nodes n join pr_tracker.saao_books b on b.id = n.book_id where b.fiscal_year >= 2090)), 1, 'baseline: one obligation (E-L3)');
 select throws_ok($$select pr_tracker.saao_apply_batch((select id from pr_tracker.saao_books where fiscal_year = 2093), jsonb_build_array(
   jsonb_build_object('op', 'obligation', 'node_id', (select id from pr_tracker.saao_nodes where label = 'E-L1'), 'month', 3, 'amount', 10),
   jsonb_build_object('op', 'obligation', 'node_id', (select id from pr_tracker.saao_nodes where label = 'E-L1'), 'month', 4, 'amount', 20),
   jsonb_build_object('op', 'update_node', 'id', (select id from pr_tracker.saao_nodes where label = 'E-L1'), 'patch', jsonb_build_object('appropriation', 999)),
   jsonb_build_object('op', 'obligation', 'node_id', (select id from pr_tracker.saao_nodes where label = 'E-L1'), 'month', 13, 'amount', 30)))$$,
   'P0001', 'Row 4: Month must be between 1 and 12', 'invalid 4th op raises Row 4');
-select is((select count(*)::int from pr_tracker.saao_obligations), 1, 'failed batch leaves none of the 3 valid ops applied (obligations)');
+select is((select count(*)::int from pr_tracker.saao_obligations where node_id in (select n.id from pr_tracker.saao_nodes n join pr_tracker.saao_books b on b.id = n.book_id where b.fiscal_year >= 2090)), 1, 'failed batch leaves none of the 3 valid ops applied (obligations)');
 select is((select appropriation from pr_tracker.saao_nodes where label = 'E-L1'), 0::numeric, 'failed batch leaves node patch unapplied');
 select throws_ok($$select pr_tracker.saao_apply_batch((select id from pr_tracker.saao_books where fiscal_year = 2093), jsonb_build_array(
   jsonb_build_object('op', 'obligation', 'node_id', (select id from pr_tracker.saao_nodes where label = 'F-L1'), 'month', 1, 'amount', 10)))$$,
@@ -157,7 +157,7 @@ select is(pr_tracker.saao_apply_batch((select id from pr_tracker.saao_books wher
   jsonb_build_object('op', 'update_node', 'id', (select id from pr_tracker.saao_nodes where label = 'E-L1'), 'patch', jsonb_build_object('appropriation', 1000)))),
   5, 'valid batch returns the op count');
 select is((select count(*)::int from pr_tracker.saao_nodes where label = 'E-B1')
-  + (select count(*)::int from pr_tracker.saao_obligations where month = 3)
+  + (select count(*)::int from pr_tracker.saao_obligations where month = 3 and node_id in (select n.id from pr_tracker.saao_nodes n join pr_tracker.saao_books b on b.id = n.book_id where b.fiscal_year >= 2090))
   + (select appropriation::int from pr_tracker.saao_nodes where label = 'E-L1'), 1002, 'valid batch applied');
 select tests.clear_authentication();
 
