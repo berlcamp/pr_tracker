@@ -1,5 +1,5 @@
 begin;
-select plan(64);
+select plan(71);
 
 select tests.make_user('eviewer@saao.test', 'CSWD');
 select tests.make_user('eencoder@saao.test', 'GSO');
@@ -97,6 +97,11 @@ select is((select amount from pr_tracker.saao_allotments where reference_no = 'A
 select lives_ok($$select pr_tracker.saao_delete_allotment((select id from pr_tracker.saao_allotments where reference_no = 'ALOB-1'))$$, 'allotment deleted');
 select is((select count(*)::int from pr_tracker.saao_allotments), 0, 'allotment row gone');
 
+-- allotment on an equals_adjusted book (mode does not affect the RPC)
+select lives_ok($$select pr_tracker.saao_upsert_allotment(null, (select id from pr_tracker.saao_nodes where label = 'F-L1'), 7, 'ALOB-F', null, null, null)$$, 'allotment on equals_adjusted book');
+select is((select count(*)::int from pr_tracker.saao_allotments where reference_no = 'ALOB-F'), 1, 'equals_adjusted allotment stored');
+select lives_ok($$select pr_tracker.saao_delete_allotment((select id from pr_tracker.saao_allotments where reference_no = 'ALOB-F'))$$, 'equals_adjusted allotment removed');
+
 -- extras
 select throws_ok($$select pr_tracker.saao_set_extra((select id from pr_tracker.saao_nodes where label = 'E-L1'), 'cna_9', 'balance', null)$$,
   'P0001', 'Unknown extra column: cna_9', 'bad extra field friendly');
@@ -159,6 +164,11 @@ select tests.clear_authentication();
 -- audit is not readable by encoders; check as the superuser
 select is((select count(*)::int from pr_tracker.saao_audit where entity = 'movement_line' and action = 'create'), 3, 'movement line audited');
 select is((select count(*)::int from pr_tracker.saao_audit where entity = 'batch'), 1, 'only the successful batch is audited');
+
+select is((select count(*)::int from pr_tracker.saao_audit where entity = 'movement_line' and action = 'create' and before is null and after is not null), 3, 'movement_line create audits have null before');
+select is((select count(*)::int from pr_tracker.saao_audit where entity = 'obligation' and action = 'create' and before is null and after is not null), 3, 'obligation create audits have null before');
+select is((select count(*)::int from pr_tracker.saao_audit where entity = 'extra' and action = 'create' and before is null and after is not null), 3, 'extra create audits have null before');
+select is((select count(*)::int from pr_tracker.saao_audit where action = 'delete' and entity in ('movement_line', 'obligation') and before is not null and after is null), 2, 'delete audits have before and null after');
 
 select * from finish();
 rollback;

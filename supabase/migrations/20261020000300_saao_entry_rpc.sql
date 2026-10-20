@@ -102,7 +102,8 @@ begin
   on conflict (movement_id, node_id) do update set amount = excluded.amount
   returning * into v_new;
   perform pr_tracker._saao_audit(v_mov.book_id, v_actor.id, 'movement_line', v_new.id,
-    case when v_old.id is null then 'create' else 'update' end, to_jsonb(v_old), to_jsonb(v_new));
+    case when v_old.id is null then 'create' else 'update' end,
+    case when v_old.id is null then null else to_jsonb(v_old) end, to_jsonb(v_new));
 end $$;
 
 -- ---------- obligations ----------
@@ -128,7 +129,8 @@ begin
     set amount = excluded.amount, entry = excluded.entry, updated_by = excluded.updated_by, updated_at = now()
   returning * into v_new;
   perform pr_tracker._saao_audit(v_book, v_actor.id, 'obligation', p_node_id,
-    case when v_old.node_id is null then 'create' else 'update' end, to_jsonb(v_old), to_jsonb(v_new));
+    case when v_old.node_id is null then 'create' else 'update' end,
+    case when v_old.node_id is null then null else to_jsonb(v_old) end, to_jsonb(v_new));
 end $$;
 
 -- ---------- allotments ----------
@@ -203,7 +205,8 @@ begin
   on conflict (node_id, field) do update set mode = excluded.mode, amount = excluded.amount
   returning * into v_new;
   perform pr_tracker._saao_audit(v_book, v_actor.id, 'extra', p_node_id,
-    case when v_old.node_id is null then 'create' else 'update' end, to_jsonb(v_old), to_jsonb(v_new));
+    case when v_old.node_id is null then 'create' else 'update' end,
+    case when v_old.node_id is null then null else to_jsonb(v_old) end, to_jsonb(v_new));
 end $$;
 
 -- ---------- batch ----------
