@@ -42,6 +42,7 @@ begin
     if v_old.id is null then raise exception 'Movement not found'; end if;
     if p_book_id is distinct from v_old.book_id then raise exception 'A movement cannot move to another book'; end if;
   end if;
+  perform pr_tracker._saao_lock_book_shared(p_book_id);
   if p_sb_number is not null and exists (
        select 1 from pr_tracker.saao_movements
         where book_id = p_book_id and sb_number = p_sb_number and id is distinct from p_id) then
@@ -73,6 +74,7 @@ declare v_actor pr_tracker.profiles := pr_tracker._saao_require('encoder'); v_ol
 begin
   select * into v_old from pr_tracker.saao_movements where id = p_id for update;
   if v_old.id is null then raise exception 'Movement not found'; end if;
+  perform pr_tracker._saao_lock_book_shared(v_old.book_id);
   if exists (select 1 from pr_tracker.saao_movement_lines where movement_id = p_id) then
     raise exception 'Remove the movement lines first';
   end if;
@@ -88,6 +90,7 @@ begin
   select * into v_mov from pr_tracker.saao_movements where id = p_movement_id for update;
   if v_mov.id is null then raise exception 'Movement not found'; end if;
   perform pr_tracker._saao_line_book(p_node_id, v_mov.book_id);
+  perform pr_tracker._saao_lock_book_shared(v_mov.book_id);
   if p_amount is null then raise exception 'An amount is required'; end if;
   select * into v_old from pr_tracker.saao_movement_lines where movement_id = p_movement_id and node_id = p_node_id;
   if p_amount = 0 then
@@ -113,6 +116,7 @@ declare v_actor pr_tracker.profiles := pr_tracker._saao_require('encoder'); v_bo
         v_entry text := pr_tracker._clean(p_entry); v_old pr_tracker.saao_obligations; v_new pr_tracker.saao_obligations;
 begin
   v_book := pr_tracker._saao_line_book(p_node_id, null);
+  perform pr_tracker._saao_lock_book_shared(v_book);
   if p_month is null or p_month < 1 or p_month > 12 then raise exception 'Month must be between 1 and 12'; end if;
   if p_amount is null then raise exception 'An amount is required'; end if;
   select * into v_old from pr_tracker.saao_obligations where node_id = p_node_id and month = p_month for update;
@@ -143,6 +147,7 @@ declare v_actor pr_tracker.profiles := pr_tracker._saao_require('encoder'); v_bo
         v_old pr_tracker.saao_allotments;
 begin
   v_book := pr_tracker._saao_line_book(p_node_id, null);
+  perform pr_tracker._saao_lock_book_shared(v_book);
   if v_status not in ('pending', 'approved', 'cancelled') then raise exception 'Unknown status: %', v_status; end if;
   if p_amount is null then raise exception 'An amount is required'; end if;
   if p_id is null then
@@ -173,6 +178,7 @@ declare v_actor pr_tracker.profiles := pr_tracker._saao_require('encoder'); v_ol
 begin
   select * into v_old from pr_tracker.saao_allotments where id = p_id for update;
   if v_old.id is null then raise exception 'Allotment not found'; end if;
+  perform pr_tracker._saao_lock_book_shared(pr_tracker._saao_line_book(v_old.node_id, null));
   delete from pr_tracker.saao_allotments where id = p_id;
   perform pr_tracker._saao_audit(pr_tracker._saao_line_book(v_old.node_id, null), v_actor.id,
     'allotment', p_id, 'delete', to_jsonb(v_old), null);
@@ -185,6 +191,7 @@ declare v_actor pr_tracker.profiles := pr_tracker._saao_require('encoder'); v_bo
         v_old pr_tracker.saao_line_extras; v_new pr_tracker.saao_line_extras;
 begin
   v_book := pr_tracker._saao_line_book(p_node_id, null);
+  perform pr_tracker._saao_lock_book_shared(v_book);
   if p_field is null or p_field not in ('cna_1', 'cna_2', 'cna_3', 'savings') then
     raise exception 'Unknown extra column: %', coalesce(p_field, '(none)');
   end if;
@@ -216,6 +223,7 @@ declare v_actor pr_tracker.profiles := pr_tracker._saao_require('encoder');
         v_op jsonb; v_i int := 0; v_node uuid; v_mov_book uuid;
 begin
   if not exists (select 1 from pr_tracker.saao_books where id = p_book_id) then raise exception 'Book not found'; end if;
+  perform pr_tracker._saao_lock_book_shared(p_book_id);
   if p_ops is null or jsonb_typeof(p_ops) <> 'array' then raise exception 'Nothing to apply'; end if;
   if jsonb_array_length(p_ops) > 2000 then raise exception 'A batch can have at most 2000 rows'; end if;
   begin

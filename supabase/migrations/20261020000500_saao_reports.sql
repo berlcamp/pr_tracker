@@ -95,7 +95,8 @@ create trigger saao_report_rows_guard before insert or update or delete on pr_tr
   for each row execute function pr_tracker._saao_report_rows_guard();
 
 -- ---------- internal helpers (NOT granted) ----------
--- Every node of the book in DFS pre-order. Siblings: sort_order, created_at, id (ruling R-A; the
+-- Every active node of the book in DFS pre-order; an inactive node and its whole subtree are
+-- left out (they carry no figures: spec §4.3 and the deactivation guards in saao_update_node). Siblings: sort_order, created_at, id (ruling R-A; the
 -- TS editor uses the same order). classification_* is the effective classification: a
 -- classification node's own; a line's own or else the nearest classification ancestor; any other
 -- node's nearest classification ancestor; null if none.
@@ -106,7 +107,7 @@ returns table (
 language sql stable security definer set search_path = '' as $$
   with recursive ranked as (
     select n.*, row_number() over (partition by n.parent_id order by n.sort_order, n.created_at, n.id) as rk
-    from pr_tracker.saao_nodes n where n.book_id = p_book_id
+    from pr_tracker.saao_nodes n where n.book_id = p_book_id and n.active
   ),
   tree as (
     select r.id, r.parent_id, r.kind, r.label, r.account_code, r.classification_id, r.total_label,
@@ -133,7 +134,7 @@ language sql stable security definer set search_path = '' as $$
   order by n.n_seq
 $$;
 
--- Snapshot-shaped rows (one per node, DFS order) computed live. Finalize inserts exactly these;
+-- Snapshot-shaped rows (one per active node, DFS order) computed live. Finalize inserts exactly these;
 -- saao_live_rows returns them as jsonb, so both share keys and types by construction.
 -- saao_compute_lines enforces the encoder role itself.
 create or replace function pr_tracker._saao_build_rows(p_report_id uuid, p_book_id uuid, p_cutoff date)
@@ -236,11 +237,14 @@ declare v_actor pr_tracker.profiles := pr_tracker._saao_require('finalizer');
         v_report pr_tracker.saao_reports; v_book pr_tracker.saao_books; v_fund pr_tracker.saao_funds;
         v_expected uuid[]; v_ack uuid[]; v_prev pr_tracker.saao_reports; v_rows int;
 begin
-  -- 1. lock; must be a draft
-  select * into v_report from pr_tracker.saao_reports where id = p_report_id for update;
+  -- 1. lock the book FOR UPDATE first: every figure/structure writer takes it FOR SHARE
+  --    (_saao_lock_book_shared), so the R11 check, the rows and the frozen movements below all
+  --    see the same state. Then lock the report; it must be a draft.
+  select * into v_report from pr_tracker.saao_reports where id = p_report_id;
   if v_report.id is null then raise exception 'Report not found'; end if;
+  select * into v_book from pr_tracker.saao_books where id = v_report.book_id for update;
+  select * into v_report from pr_tracker.saao_reports where id = p_report_id for update;
   if v_report.status <> 'draft' then raise exception 'Only a draft can be finalized'; end if;
-  select * into v_book from pr_tracker.saao_books where id = v_report.book_id for share;
   select * into v_fund from pr_tracker.saao_funds where id = v_book.fund_id;
 
   -- 3. PROVISIONAL (R11): the acknowledged set must equal the counted unapproved movements
@@ -321,13 +325,17 @@ begin
   return v_id;
 end $$;
 
--- Same row shape as saao_report_rows (minus report_id), computed live.
+-- Same row shape as saao_report_rows (minus report_id), computed live. The cutoff is
+-- normalised to month end, as saao_create_draft does.
 create or replace function pr_tracker.saao_live_rows(p_book_id uuid, p_cutoff date)
 returns setof jsonb language plpgsql stable security definer set search_path = '' as $$
+declare v_cutoff date;
 begin
   perform pr_tracker._saao_require('encoder');
+  if p_cutoff is null then raise exception 'Cutoff date is required'; end if;
+  v_cutoff := (date_trunc('month', p_cutoff::timestamp) + interval '1 month - 1 day')::date;
   return query
-  select to_jsonb(r) - 'report_id' from pr_tracker._saao_build_rows(null, p_book_id, p_cutoff) r order by r.seq;
+  select to_jsonb(r) - 'report_id' from pr_tracker._saao_build_rows(null, p_book_id, v_cutoff) r order by r.seq;
 end $$;
 
 revoke all on function

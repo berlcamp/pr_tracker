@@ -40,6 +40,16 @@ begin
   drop table pg_temp.saao_sibs;
 end $$;
 
+-- Every RPC that writes figures or structure of a book takes this share lock first, so
+-- saao_finalize (which takes the book row FOR UPDATE) sees one consistent state of the book.
+-- No-op when the book does not exist; callers raise their own friendly errors.
+create or replace function pr_tracker._saao_lock_book_shared(p_book_id uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  perform 1 from pr_tracker.saao_books where id = p_book_id for share;
+end $$;
+revoke all on function pr_tracker._saao_lock_book_shared(uuid) from public, anon, authenticated;
+
 create or replace function pr_tracker._saao_valid_account_code(p text)
 returns void language plpgsql immutable set search_path = '' as $$
 begin
@@ -225,6 +235,7 @@ declare v_actor pr_tracker.profiles := pr_tracker._saao_require('encoder');
         v_label text := pr_tracker._clean(p_label); v_code text := pr_tracker._clean(p_account_code); v_id uuid;
 begin
   if not exists (select 1 from pr_tracker.saao_books where id = p_book_id) then raise exception 'Book not found'; end if;
+  perform pr_tracker._saao_lock_book_shared(p_book_id);
   if v_label is null then raise exception 'A label is required'; end if;
   perform pr_tracker._saao_valid_account_code(v_code);
   -- the node guard validates parent book/kind, classification headings and the kind check constraint
@@ -244,6 +255,7 @@ declare v_actor pr_tracker.profiles := pr_tracker._saao_require('encoder');
 begin
   select * into v_old from pr_tracker.saao_nodes where id = p_id for update;
   if v_old.id is null then raise exception 'Row not found'; end if;
+  perform pr_tracker._saao_lock_book_shared(v_old.book_id);
   if p_patch is null or jsonb_typeof(p_patch) <> 'object' then raise exception 'Nothing to update'; end if;
   -- kind and book_id are deliberately not patchable: they would break the tree
   for k in select jsonb_object_keys(p_patch) loop
@@ -272,6 +284,15 @@ begin
      and (v_new.appropriation <> 0 or pr_tracker._saao_line_has_figures(p_id)) then
     raise exception 'This line has figures; remove them before deactivating';
   end if;
+  -- inactive headings hide their whole subtree from reports, so no line under them may carry figures
+  if v_old.kind <> 'line' and v_old.active and not v_new.active and exists (
+    with recursive d as (
+      select id, kind from pr_tracker.saao_nodes where parent_id = p_id
+      union all
+      select c.id, c.kind from pr_tracker.saao_nodes c join d on c.parent_id = d.id)
+    select 1 from d where d.kind = 'line' and pr_tracker._saao_line_has_figures(d.id)) then
+    raise exception 'Lines under this heading have figures; remove them before deactivating';
+  end if;
 
   update pr_tracker.saao_nodes set label = v_new.label, account_code = v_new.account_code,
       classification_id = v_new.classification_id, office_id = v_new.office_id, total_label = v_new.total_label,
@@ -289,6 +310,7 @@ declare v_actor pr_tracker.profiles := pr_tracker._saao_require('encoder');
 begin
   select * into v_old from pr_tracker.saao_nodes where id = p_id;
   if v_old.id is null then raise exception 'Row not found'; end if;
+  perform pr_tracker._saao_lock_book_shared(v_old.book_id);
   if p_new_parent_id is not null then
     select * into v_parent from pr_tracker.saao_nodes where id = p_new_parent_id;
     if v_parent.id is null then raise exception 'Target row not found'; end if;
@@ -323,6 +345,7 @@ declare v_actor pr_tracker.profiles := pr_tracker._saao_require('encoder'); v_ol
 begin
   select * into v_old from pr_tracker.saao_nodes where id = p_id for update;
   if v_old.id is null then raise exception 'Row not found'; end if;
+  perform pr_tracker._saao_lock_book_shared(v_old.book_id);
   if v_old.kind = 'line' and pr_tracker._saao_line_has_figures(p_id) then
     raise exception 'This line has figures and cannot be deleted';
   end if;
