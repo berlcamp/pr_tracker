@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { computeLine, obligationPct, sumAmounts, type CalcContext, type LineInput } from "./calc";
+import { computeLine, obligationPct, type CalcContext, type LineInput } from "./calc";
+import { totalAmounts } from "./rollup";
 import { basic, lineInputs } from "./fixtures";
 
 const inputs = lineInputs(basic);
@@ -43,7 +44,7 @@ describe("computeLine matches the shared fixture", () => {
       }
       test("grand totals", () => {
         const lines = Object.values(inputs).map((i) => computeLine(i, context));
-        expect(sumAmounts(lines)).toEqual(c.expected.totals);
+        expect(totalAmounts(lines)).toEqual(c.expected.totals);
       });
     });
   }

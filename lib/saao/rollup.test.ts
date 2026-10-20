@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { classificationTotals, monthlyTotals, rollup, sectionSummaries } from "./rollup";
-import { sumAmounts, zeroAmounts } from "./calc";
+import { classificationTotals, monthlyTotals, rollup, sectionSummaries, totalAmounts } from "./rollup";
+import { zeroAmounts } from "./calc";
 import { basic, reportRows } from "./fixtures";
 import type { LineAmounts, NodeKind, ReportRow } from "./types";
 
@@ -62,7 +62,7 @@ describe("rollup", () => {
     expect(mooe.months[8]).toBe(120000 + 1850000);
     const cmo = subtotalOf("sec_a").amounts!;
     expect(cmo.adjusted).toBe(10466667 + 4850050 + 2100000 + 0);
-    expect(cmo.savingsHalf).toBe(2210013 + 125000);
+    expect(cmo.savingsHalf).toBe(Math.round((4420025 + 250000) / 2)); // R14: half of summed savings
   });
 
   test("headings and notes carry no amounts; lines carry their own", () => {
@@ -157,7 +157,7 @@ describe("summaries", () => {
   });
 
   test("the grand total equals the sum of section summaries", () => {
-    expect(sumAmounts(sections.map((s) => s.amounts))).toEqual(byKey.get("grand")!.amounts);
+    expect(totalAmounts(sections.map((s) => s.amounts))).toEqual(byKey.get("grand")!.amounts);
   });
 
   test("classificationTotals uses nearest classification and puts the stand-alone line under UNCLASSIFIED", () => {
@@ -177,6 +177,27 @@ describe("summaries", () => {
       row(3, 1, 1, "line", "b", amounts({ adjusted: 20 }), { classificationCode: "CO", classificationName: "Capital Outlay" }),
     ]);
     expect(totals.map((t) => [t.code, t.amounts.adjusted])).toEqual([["MOOE", 10], ["CO", 20]]);
+  });
+
+  test("50% of Savings at every total level is half of summed savings, rounded once (R14)", () => {
+    // Two lines with 0.01 savings: each line's half rounds to 0.01, so the line halves sum to 0.02,
+    // but the total is round(0.02 / 2) = 0.01.
+    const r = [
+      row(1, null, 0, "section", "S"),
+      row(2, 1, 1, "group", "G"),
+      row(3, 2, 2, "line", "a", amounts({ savings: 1, savingsHalf: 1 })),
+      row(4, 2, 2, "line", "b", amounts({ savings: 1, savingsHalf: 1 })),
+      row(5, null, 0, "line", "c", amounts({ savings: 3, savingsHalf: 2 })),
+    ];
+    const d = new Map(rollup(r).map((x) => [x.key, x]));
+    expect(d.get("t-2")!.amounts!.savingsHalf).toBe(1);
+    expect(d.get("t-1")!.amounts!.savingsHalf).toBe(1);
+    expect(d.get("grand")!.amounts!.savingsHalf).toBe(3); // round(5 / 2) away from zero, not 1 + 1 + 2
+    expect(sectionSummaries(r).map((x) => x.amounts.savingsHalf)).toEqual([1, 2]);
+    expect(classificationTotals(r)[0].amounts.savingsHalf).toBe(3);
+    const neg = rollup([row(1, null, 0, "group", "N"), row(2, 1, 1, "line", "x", amounts({ savings: -1, savingsHalf: -1 })),
+      row(3, 1, 1, "line", "y", amounts({ savings: -2, savingsHalf: -1 }))]);
+    expect(neg.find((x) => x.key === "t-1")!.amounts!.savingsHalf).toBe(-2); // -1.5 -> away from zero
   });
 
   test("monthlyTotals", () => {

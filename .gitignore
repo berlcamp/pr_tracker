@@ -44,3 +44,6 @@ next-env.d.ts
 # tests
 /test-results
 /playwright-report
+
+# python bytecode (dev scripts)
+__pycache__/

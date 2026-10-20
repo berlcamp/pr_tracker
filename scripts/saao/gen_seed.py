@@ -15,6 +15,7 @@ section total or grand total differs from the workbook's cached values.
 
 Requires openpyxl (tested with 3.1.5).
 """
+import json
 import re
 import sys
 from decimal import Decimal, ROUND_HALF_UP
@@ -60,6 +61,11 @@ PARENT_OVERRIDES = {
     1318: 1252,      # "5% Local DRRM 2024- SB3" is a continuing fund beside the 70% Management Fund,
     1325: 1252,      # "5% Local DRRM 2025- SB3" likewise,
     1347: 1252,      # and "QUICK RESPONSE FUND ( 30% )" is the other 30% of the calamity fund.
+}
+# One description wrapped over two rows: target row -> row holding the first part of its text.
+# The first row is dropped; the target keeps its own figures and gets the joined label.
+LABEL_MERGE = {
+    215: 214,        # "ELCAC/RCSP Implementation, Meetings, Capability" + "Building & IEC Materials"
 }
 # Rows typed at the wrong indent among their siblings: row -> indent column (A=0).
 INDENT_OVERRIDES = {
@@ -248,6 +254,9 @@ class Seed:
                 f = S.formula(r, col)
                 if not total and is_formula(f) and pre in f and self.rows[r][col.lower()] is None:
                     self.err(f'SAAO {col}{r} has an unexpected formula {f!r}')
+        for target, first in LABEL_MERGE.items():
+            self.rows[target]['text'] = collapse(f"{self.rows[first]['text']} {self.rows[target]['text']}")
+            self.rows[first]['text'] = None
         for r, info in self.rows.items():
             if not info['total']:
                 info['fig'] = self.read_figures(r)
@@ -399,7 +408,6 @@ class Seed:
                 for q in range(a, e + 1):
                     if self.rows.get(q, {}).get('kind') == 'total':
                         self.err(f'total row {r}: its range contains total row {q} (double count)')
-        self.first_cache = {}
 
     def first(self, r):
         """First content row of a block (or the row itself for a referenced line)."""
@@ -834,7 +842,7 @@ def emit(seed, out):
     w("             where b.fiscal_year = 2026 and f.code = 'GF') then\n    return;\n  end if;\n\n")
     w("  select id into v_fund from pr_tracker.saao_funds where code = 'GF';\n")
     w('  insert into pr_tracker.saao_books (fiscal_year, fund_id, title, header_lines, certifier_name, certifier_title)\n')
-    hl = '[' + ', '.join('"' + h.replace('"', '\\"') + '"' for h in header) + ']'
+    hl = json.dumps(header, ensure_ascii=False)
     w(f"  values (2026, v_fund, 'FY 2026 General Fund', {q(hl)}::jsonb, {q(cert_name)}, {q(cert_title)})\n")
     w('  returning id into v_book;\n\n')
 

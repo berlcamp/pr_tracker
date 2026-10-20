@@ -6,7 +6,7 @@
     "nodes are listed in tree (DFS) order; sortOrder is the position under the parent. classificationCode is set on classification nodes (seeded PS/MOOE/CO) and would be an override on lines (none here). Non-line nodes have appropriation \"0.00\".",
     "movements.lines[].nodeKey, obligations, allotments and extras refer to nodes[].key. Obligation month is 1..12. extras.amount is null when mode = 'balance'.",
     "Book: fiscal year 2090, General Fund. Every context uses cutoff 2090-09-30 and differs only in allotmentMode (R5) and movementRule (R11).",
-    "totals are grand totals: the plain sum of the six lines for every field (R10). savingsHalf total is the sum of the per-line halves, not half of the total savings."
+    "totals are grand totals: the plain sum of the six lines for every field (R10), except savingsHalf, which is half of the summed savings rounded once, half away from zero (R14 ruling), not the sum of the per-line halves."
   ],
   "fiscalYear": 2090,
   "nodes": [
@@ -80,7 +80,7 @@
     "l4: appropriation 0; only m6 (after cutoff) touches it -> every amount 0; sb {}; adjusted 0 so obligation % is null (R9).",
     "l5: appropriation 3000000; realignment = m3 400000 + m4 200000 = 600000; totalChanges 600000; adjusted 3600000; allotment 3600000; obligation = m1 1200000; balances 2400000; savings = amount 100001; savingsHalf = 50000.5 -> 50001.",
     "l6: appropriation 4000000; nta = m5 -100000; sb {2: 300000}; supplemental 300000; realignment 0; totalChanges = -100000 + 300000 + 0 = 200000; adjusted 4200000; allotment 4200000; obligation 0 (October entry excluded); balances 4200000.",
-    "Totals: appropriation 24000000; nta -100000; sb {1: 750050, 2: 400000}; supplemental 1150050; realignment = -33333 - 400000 + 600000 = 166667; totalChanges = -100000 + 1150050 + 166667 = 1216717; adjusted 25216717; obligation = 3500000 + 430025 + 1850000 + 1200000 = 6980025; months Jan 3510025, Sep 3470000; balances 25216717 - 6980025 = 18236692; cna1 123456; cna2 250000; savings = 4420025 + 250000 + 100001 = 4770026; savingsHalf = 2210013 + 125000 + 50001 = 2385014.",
+    "Totals: appropriation 24000000; nta -100000; sb {1: 750050, 2: 400000}; supplemental 1150050; realignment = -33333 - 400000 + 600000 = 166667; totalChanges = -100000 + 1150050 + 166667 = 1216717; adjusted 25216717; obligation = 3500000 + 430025 + 1850000 + 1200000 = 6980025; months Jan 3510025, Sep 3470000; balances 25216717 - 6980025 = 18236692; cna1 123456; cna2 250000; savings = 4420025 + 250000 + 100001 = 4770026; savingsHalf = 4770026 / 2 = 2385013 (half of summed savings; the per-line halves would sum to 2385014).",
     "--- Context approved_only + equals_adjusted (differences only) ---",
     "l1: m7 (cancelled) drops: realignment 0, totalChanges 500000, adjusted 10500000, allotment 10500000, balances 7000000.",
     "l5: m4 (pending) drops: realignment 400000, totalChanges 400000, adjusted 3400000, allotment 3400000, balances 2200000.",
@@ -89,7 +89,7 @@
     "Allotments: l1 6000000 (pending 10000.00 excluded); l2 3000000 (Oct 5000.00 excluded); l3 1849999 (cancelled excluded); l4 0; l5 3000000; l6 0. Total 13849999.",
     "Balances: l1 6000000-3500000 = 2500000; l2 3000000-430025 = 2569975; l3 1849999-1850000 = -1; l4 0; l5 3000000-1200000 = 1800000; l6 0. Total 6869974.",
     "l2 savings 2569975, half 1284987.5 -> 1284988. l3 cna2 = savings = -1, half -0.5 -> away from zero -1. l5 savings 100001, half 50001.",
-    "Totals: cna2 -1; savings = 2569975 - 1 + 100001 = 2669975; savingsHalf = 1284988 - 1 + 50001 = 1334988. Adjusted etc. as the first context (25216717).",
+    "Totals: cna2 -1; savings = 2569975 - 1 + 100001 = 2669975; savingsHalf = 2669975 / 2 = 1334987.5 -> away from zero 1334988. Adjusted etc. as the first context (25216717).",
     "--- Context approved_only + recorded ---",
     "Movement figures as approved_only (adjusted 25050050; l1 adjusted 10500000, l5 adjusted 3400000); allotments, balances and extras as all_entered + recorded (balances do not depend on adjusted in recorded mode)."
   ],
@@ -108,7 +108,7 @@
           "l5": { "appropriation": 3000000, "nta": 0, "sb": {}, "supplemental": 0, "realignment": 600000, "totalChanges": 600000, "adjusted": 3600000, "allotment": 3600000, "obligation": 1200000, "months": [1200000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "balanceAppropriation": 2400000, "balanceAllotment": 2400000, "cna1": 0, "cna2": 0, "cna3": 0, "savings": 100001, "savingsHalf": 50001 },
           "l6": { "appropriation": 4000000, "nta": -100000, "sb": { "2": 300000 }, "supplemental": 300000, "realignment": 0, "totalChanges": 200000, "adjusted": 4200000, "allotment": 4200000, "obligation": 0, "months": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "balanceAppropriation": 4200000, "balanceAllotment": 4200000, "cna1": 0, "cna2": 0, "cna3": 0, "savings": 0, "savingsHalf": 0 }
         },
-        "totals": { "appropriation": 24000000, "nta": -100000, "sb": { "1": 750050, "2": 400000 }, "supplemental": 1150050, "realignment": 166667, "totalChanges": 1216717, "adjusted": 25216717, "allotment": 25216717, "obligation": 6980025, "months": [3510025, 0, 0, 0, 0, 0, 0, 0, 3470000, 0, 0, 0], "balanceAppropriation": 18236692, "balanceAllotment": 18236692, "cna1": 123456, "cna2": 250000, "cna3": 0, "savings": 4770026, "savingsHalf": 2385014 }
+        "totals": { "appropriation": 24000000, "nta": -100000, "sb": { "1": 750050, "2": 400000 }, "supplemental": 1150050, "realignment": 166667, "totalChanges": 1216717, "adjusted": 25216717, "allotment": 25216717, "obligation": 6980025, "months": [3510025, 0, 0, 0, 0, 0, 0, 0, 3470000, 0, 0, 0], "balanceAppropriation": 18236692, "balanceAllotment": 18236692, "cna1": 123456, "cna2": 250000, "cna3": 0, "savings": 4770026, "savingsHalf": 2385013 }
       }
     },
     {
@@ -125,7 +125,7 @@
           "l5": { "appropriation": 3000000, "nta": 0, "sb": {}, "supplemental": 0, "realignment": 400000, "totalChanges": 400000, "adjusted": 3400000, "allotment": 3400000, "obligation": 1200000, "months": [1200000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "balanceAppropriation": 2200000, "balanceAllotment": 2200000, "cna1": 0, "cna2": 0, "cna3": 0, "savings": 100001, "savingsHalf": 50001 },
           "l6": { "appropriation": 4000000, "nta": -100000, "sb": { "2": 300000 }, "supplemental": 300000, "realignment": 0, "totalChanges": 200000, "adjusted": 4200000, "allotment": 4200000, "obligation": 0, "months": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "balanceAppropriation": 4200000, "balanceAllotment": 4200000, "cna1": 0, "cna2": 0, "cna3": 0, "savings": 0, "savingsHalf": 0 }
         },
-        "totals": { "appropriation": 24000000, "nta": -100000, "sb": { "1": 750050, "2": 400000 }, "supplemental": 1150050, "realignment": 0, "totalChanges": 1050050, "adjusted": 25050050, "allotment": 25050050, "obligation": 6980025, "months": [3510025, 0, 0, 0, 0, 0, 0, 0, 3470000, 0, 0, 0], "balanceAppropriation": 18070025, "balanceAllotment": 18070025, "cna1": 123456, "cna2": 250000, "cna3": 0, "savings": 4770026, "savingsHalf": 2385014 }
+        "totals": { "appropriation": 24000000, "nta": -100000, "sb": { "1": 750050, "2": 400000 }, "supplemental": 1150050, "realignment": 0, "totalChanges": 1050050, "adjusted": 25050050, "allotment": 25050050, "obligation": 6980025, "months": [3510025, 0, 0, 0, 0, 0, 0, 0, 3470000, 0, 0, 0], "balanceAppropriation": 18070025, "balanceAllotment": 18070025, "cna1": 123456, "cna2": 250000, "cna3": 0, "savings": 4770026, "savingsHalf": 2385013 }
       }
     },
     {

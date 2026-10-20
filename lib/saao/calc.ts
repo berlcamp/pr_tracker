@@ -27,7 +27,8 @@ const SCALAR_FIELDS = [
   "balanceAppropriation", "balanceAllotment", "cna1", "cna2", "cna3", "savings", "savingsHalf",
 ] as const;
 
-/** Column-wise sum of line amounts (R10). savingsHalf is the sum of the line halves. */
+/** Column-wise sum of line amounts (R10). savingsHalf here is the plain sum of line halves;
+ * totals shown anywhere go through totalAmounts() in rollup.ts, which re-derives it (R14). */
 export function sumAmounts(list: LineAmounts[]): LineAmounts {
   const out = zeroAmounts();
   for (const a of list) {
@@ -45,7 +46,7 @@ export function obligationPct(obligation: number, adjusted: number): number | nu
 }
 
 /** Half away from zero, matching SQL round(x / 2, 2) on numeric(18,2). */
-function half(c: number): number {
+export function half(c: number): number {
   return Math.sign(c) * Math.round(Math.abs(c) / 2) || 0;
 }
 

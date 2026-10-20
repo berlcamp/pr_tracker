@@ -105,7 +105,8 @@ export function buildFixtureSql(f: FixtureLike): string {
         `select results_eq($q$select ${COLS} from ${fn} c where c.node_id = ${q(nodeId.get(n.key)!)}$q$, $q$values (${row(c.expected.lines[n.key])})$q$, ${q(`${c.name}: ${n.key}`)});`,
       );
     }
-    const t = `with c as (select * from ${fn}) select sum(appropriation), sum(nta), coalesce((select jsonb_object_agg(k, s) from (select e.key k, sum(e.value::numeric) s from c, jsonb_each_text(c.sb) e group by e.key) q), '{}'::jsonb), sum(supplemental), sum(realignment), sum(total_changes), sum(adjusted), sum(allotment), sum(obligation), (select array_agg(s order by i) from (select u.i, sum(u.m) s from c, unnest(c.months) with ordinality u(m, i) group by u.i) q), sum(balance_appropriation), sum(balance_allotment), sum(cna_1), sum(cna_2), sum(cna_3), sum(savings), sum(savings_half) from c`;
+    const t = `with c as (select * from ${fn}) select sum(appropriation), sum(nta), coalesce((select jsonb_object_agg(k, s) from (select e.key k, sum(e.value::numeric) s from c, jsonb_each_text(c.sb) e group by e.key) q), '{}'::jsonb), sum(supplemental), sum(realignment), sum(total_changes), sum(adjusted), sum(allotment), sum(obligation), (select array_agg(s order by i) from (select u.i, sum(u.m) s from c, unnest(c.months) with ordinality u(m, i) group by u.i) q), sum(balance_appropriation), sum(balance_allotment), sum(cna_1), sum(cna_2), sum(cna_3), sum(savings), round(sum(savings) / 2, 2) from c`;
+    // AWAITING BUDGET OFFICE (R14): the total 50% is half of summed savings, rounded once (not sum(savings_half)).
     out.push(`select results_eq($q$${t}$q$, $q$values (${row(c.expected.totals)})$q$, ${q(`${c.name}: totals`)});`);
     out.push("select tests.clear_authentication();");
   }

@@ -1,6 +1,6 @@
 // Turns ordered report rows (live or snapshot) into display rows with subtotals
 // and a grand total (spec §5 step 2). The only place totals are derived (R10).
-import { obligationPct, sumAmounts, zeroAmounts } from "./calc";
+import { half, obligationPct, sumAmounts, zeroAmounts } from "./calc";
 import type { LineAmounts, ReportRow } from "./types";
 
 export type DisplayRow = {
@@ -13,6 +13,14 @@ export type DisplayRow = {
   pct: number | null;
   sectionSeq: number | null;
 };
+
+/** Totals of line amounts for any subtotal, section, classification or grand total (R10). */
+export function totalAmounts(list: LineAmounts[]): LineAmounts {
+  const out = sumAmounts(list);
+  // AWAITING BUDGET OFFICE (R14): total = half of summed savings, rounded once
+  out.savingsHalf = half(out.savings);
+  return out;
+}
 
 const pctOf = (a: LineAmounts | null) => (a ? obligationPct(a.obligation, a.adjusted) : null);
 
@@ -56,7 +64,7 @@ export function rollup(rows: ReportRow[], opts?: { sectionSeq?: number }): Displ
   const close = (h: ReportRow) => {
     const lines = idx.linesUnder.get(h.seq);
     if (h.kind === "line" || !h.showTotal || !lines?.length) return;
-    const amounts = sumAmounts(lines);
+    const amounts = totalAmounts(lines);
     out.push({
       key: `t-${h.seq}`, type: "subtotal", row: h, depth: h.depth,
       label: h.totalLabel ?? `TOTAL ${h.label}`, amounts, pct: pctOf(amounts), sectionSeq: idx.sectionOf(h),
@@ -75,7 +83,7 @@ export function rollup(rows: ReportRow[], opts?: { sectionSeq?: number }): Displ
   while (open.length) close(open.pop()!);
 
   if (filter === undefined) {
-    const amounts = sumAmounts(rows.flatMap((r) => (r.kind === "line" && r.amounts ? [r.amounts] : [])));
+    const amounts = totalAmounts(rows.flatMap((r) => (r.kind === "line" && r.amounts ? [r.amounts] : [])));
     const grandRow: ReportRow = {
       seq: 0, parentSeq: null, depth: 0, kind: "section", nodeId: null, label: "GRAND TOTAL",
       accountCode: null, classificationCode: null, classificationName: null, totalLabel: null,
@@ -93,7 +101,7 @@ export function sectionSummaries(rows: ReportRow[]): { seq: number; label: strin
     .filter((r) => r.depth === 0 && r.kind !== "note")
     .map((r) => {
       const lines = idx.linesUnder.get(r.seq);
-      const amounts = lines?.length ? sumAmounts(lines) : zeroAmounts();
+      const amounts = lines?.length ? totalAmounts(lines) : zeroAmounts();
       return { seq: r.seq, label: r.label, amounts, pct: pctOf(amounts) };
     });
 }
@@ -120,12 +128,12 @@ export function classificationTotals(rows: ReportRow[]): { code: string; name: s
     g.lines.push(r.amounts);
     groups.set(code, g);
   }
-  const out = [...groups].map(([code, g]) => ({ code, name: g.name, amounts: sumAmounts(g.lines) }));
-  if (unclassified.length) out.push({ ...UNCLASSIFIED, amounts: sumAmounts(unclassified) });
+  const out = [...groups].map(([code, g]) => ({ code, name: g.name, amounts: totalAmounts(g.lines) }));
+  if (unclassified.length) out.push({ ...UNCLASSIFIED, amounts: totalAmounts(unclassified) });
   return out;
 }
 
 /** Monthly obligation totals across all lines (12 entries, January first). */
 export function monthlyTotals(rows: ReportRow[]): number[] {
-  return sumAmounts(rows.flatMap((r) => (r.kind === "line" && r.amounts ? [r.amounts] : []))).months;
+  return totalAmounts(rows.flatMap((r) => (r.kind === "line" && r.amounts ? [r.amounts] : []))).months;
 }
