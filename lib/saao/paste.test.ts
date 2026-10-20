@@ -117,3 +117,16 @@ describe("changesToOps", () => {
     expect(() => changesToOps([{ nodeId: "n1", colKey: "sb-7", from: "", to: "1", centavos: 100 }], ctx)).toThrow("SB-7 does not exist yet");
   });
 });
+
+describe("appropriation reference", () => {
+  test("is free text: trimmed, blank allowed, unchanged gives no change", () => {
+    const plan = planPaste([["AB-1", "", "same"]], [[t("a", "appropriation_ref", "ref"), t("b", "appropriation_ref", "ref"), t("c", "appropriation_ref", "ref")]],
+      (id) => (id === "b" ? "old" : id === "c" ? " same" : ""));
+    expect(plan.errors).toEqual([]);
+    expect(plan.changes.map((c) => [c.nodeId, c.to])).toEqual([["a", "AB-1"], ["b", ""]]);
+    expect(changesToOps(plan.changes, { sbMovementIds: {}, bookId: "bk" })).toEqual([
+      { op: "update_node", id: "a", patch: { appropriation_ref: "AB-1" } },
+      { op: "update_node", id: "b", patch: { appropriation_ref: null } },
+    ]);
+  });
+});

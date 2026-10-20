@@ -2,12 +2,12 @@
 // targets for a preview, and turn the accepted changes into saao_apply_batch ops.
 import { parseAmount, toPeso } from "./money";
 
-export type PasteEditable = false | "label" | "code" | "appropriation" | "sb" | "extra" | "obligation" | "movement_line";
+export type PasteEditable = false | "label" | "code" | "appropriation" | "ref" | "sb" | "extra" | "obligation" | "movement_line";
 
 export type PasteTarget = { rowKey: string; nodeId: string; colKey: string; editable: PasteEditable };
 
 /**
- * One cell change. Column keys: `label`, `code`, `appropriation`, `sb-<n>` (SB-n movement line),
+ * One cell change. Column keys: `label`, `code`, `appropriation`, `appropriation_ref` (free text), `sb-<n>` (SB-n movement line),
  * `cna1` | `cna2` | `cna3` | `savings` (extras), `m<1..12>` (monthly obligation), `mv:<movementId>` (movement line).
  * Amount changes carry `centavos` (and `entry`, the typed expression or null). Extra changes carry
  * `entry: "balance"` for "= Balance of Allotment", `centavos` for an amount, or neither to clear.
@@ -86,6 +86,8 @@ export function planCell(editable: Exclude<PasteEditable, false>, text: string, 
       if (v !== "" && !ACCOUNT_CODE.test(v)) return { error: ACCOUNT_CODE_MESSAGE };
       return { change: v === current.trim() ? null : {} };
     }
+    case "ref":
+      return { change: text.trim() === current.trim() ? null : {} };
     case "extra": {
       const next = classifyExtra(text);
       if ("error" in next) return { error: next.error };
@@ -144,6 +146,7 @@ export function changesToOps(changes: PasteChange[], ctx: { sbMovementIds: Recor
     if (ch.colKey === "label") return { op: "update_node", id: ch.nodeId, patch: { label: ch.to.trim() } };
     if (ch.colKey === "code") return { op: "update_node", id: ch.nodeId, patch: { account_code: ch.to.trim() || null } };
     if (ch.colKey === "appropriation") return { op: "update_node", id: ch.nodeId, patch: { appropriation: amount() } };
+    if (ch.colKey === "appropriation_ref") return { op: "update_node", id: ch.nodeId, patch: { appropriation_ref: ch.to.trim() || null } };
     const sb = sbNumberOfCol(ch.colKey);
     if (sb !== null) {
       const movementId = ctx.sbMovementIds[String(sb)];

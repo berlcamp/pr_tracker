@@ -9,7 +9,8 @@ import type { DisplayRow } from "@/lib/saao/rollup";
 import type { PasteEditable } from "@/lib/saao/paste";
 import { cn } from "@/lib/utils";
 
-export type GridColumn = { key: string; header: string; numeric: boolean };
+/** `width` overrides the default width in px (the first column defaults to the wide Description width). */
+export type GridColumn = { key: string; header: string; numeric: boolean; width?: number };
 export type CellKind = { editable: PasteEditable; href?: string };
 export type CellPos = { rowKey: string; colKey: string };
 export type FocusRequest = CellPos & { edit: boolean; nonce: number };
@@ -19,6 +20,22 @@ export function rowKeyOf(r: DisplayRow): string {
   if (r.type === "grand") return "grand";
   const id = r.row.nodeId ?? `seq-${r.row.seq}`;
   return r.type === "subtotal" ? `t:${id}` : id;
+}
+
+/**
+ * Reuses the previous object of each row whose signature is unchanged, so memoised grid rows skip
+ * re-rendering after a commit. `sig` must cover everything the row's cells display.
+ */
+export function useStableRows<R extends DisplayRow>(rows: R[], sig: (r: R) => string): R[] {
+  const [state, setState] = useState({ src: rows, out: rows });
+  if (state.src === rows) return state.out;
+  const prev = new Map(state.out.map((r) => [rowKeyOf(r), r]));
+  const out = rows.map((r) => {
+    const old = prev.get(rowKeyOf(r));
+    return old && sig(old) === sig(r) ? old : r;
+  });
+  setState({ src: rows, out });
+  return out;
 }
 
 type Editing = { initial: string; caret: boolean; selectAll?: boolean };
@@ -38,16 +55,24 @@ type Props = {
   renderMenu?: (row: DisplayRow, open: boolean, setOpen: (open: boolean) => void, focusGrid: () => void) => ReactNode;
   focusRequest?: FocusRequest | null;
   emptyMessage?: ReactNode;
+  /** Extra classes for a cell (e.g. shading); must be a stable function of (row, column key). */
+  cellClassName?: (row: DisplayRow, colKey: string) => string | undefined;
+  /** Tooltip for a cell; must be a stable function of (row, column key). */
+  cellTitle?: (row: DisplayRow, colKey: string) => string | undefined;
+  /** Accessible name of the grid. */
+  label?: string;
 };
 
 const PAGE = 20;
 const DESCRIPTION_WIDTH = 384;
 const HEADER_HEIGHT = 32;
 /** Fixed column widths: with table-layout fixed, moving the selection never re-lays out ~30k cells. */
-const widthOf = (c: GridColumn, i: number) => (i === 0 ? DESCRIPTION_WIDTH : c.key === "code" ? 104 : c.key === "pct" ? 72 : c.numeric ? 136 : 160);
+const widthOf = (c: GridColumn, i: number) =>
+  c.width ?? (i === 0 ? DESCRIPTION_WIDTH : c.key === "code" ? 104 : c.key === "pct" ? 72 : c.numeric ? 136 : 160);
 
 export function EditableGrid({
   rows, columns, cellText, cellKind, editText, onCommit, onPaste, renderMenu, focusRequest, emptyMessage,
+  cellClassName, cellTitle, label = "SAAO workspace",
 }: Props) {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -92,8 +117,8 @@ export function EditableGrid({
     const top = b.top + HEADER_HEIGHT, bottom = b.top + box.clientHeight;
     if (r.top < top) box.scrollTop -= top - r.top;
     else if (r.bottom > bottom) box.scrollTop += r.bottom - bottom;
-    if (el.dataset.col !== columns[0]?.key) {
-      const left = b.left + DESCRIPTION_WIDTH, right = b.left + box.clientWidth;
+    if (columns.length && el.dataset.col !== columns[0].key) {
+      const left = b.left + widthOf(columns[0], 0), right = b.left + box.clientWidth;
       if (r.left < left) box.scrollLeft -= left - r.left;
       else if (r.right > right) box.scrollLeft += r.right - right;
     }
@@ -245,7 +270,7 @@ export function EditableGrid({
       ref={containerRef}
       tabIndex={0}
       role="region"
-      aria-label="SAAO workspace grid"
+      aria-label={`${label} grid`}
       onKeyDown={onKeyDown}
       onPaste={onPasteEvent}
       onMouseDown={onMouseDown}
@@ -253,7 +278,7 @@ export function EditableGrid({
       onContextMenu={onContextMenu}
       className="max-h-[calc(100vh-15rem)] min-h-64 overflow-auto rounded-md border outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
     >
-      <table role="grid" aria-label="SAAO workspace" aria-rowcount={rows.length} className="table-fixed border-separate border-spacing-0 text-xs" style={{ width: tableWidth }}>
+      <table role="grid" aria-label={label} aria-rowcount={rows.length} className="table-fixed border-separate border-spacing-0 text-xs" style={{ width: tableWidth }}>
         <colgroup>{columns.map((c, i) => <col key={c.key} style={{ width: widthOf(c, i) }} />)}</colgroup>
         <thead>
           <tr>
@@ -278,6 +303,7 @@ export function EditableGrid({
             const isActive = key === activeKey;
             return (
               <GridRow key={key} rowKey={key} row={r} columns={columns} cellText={cellText} cellKind={cellKind}
+                cellClassName={cellClassName} cellTitle={cellTitle} hasMenu={!!renderMenu}
                 activeCol={isActive ? activeCol : null} editing={isActive ? editing : null} editorApi={isActive ? editorApi : null}
                 menu={menu?.rowKey === key && renderMenu && r.type === "node" ? { render: renderMenu, open: menu.open, api: menuApi } : null} />
             );
@@ -294,13 +320,18 @@ type RowProps = {
   columns: GridColumn[];
   cellText: Props["cellText"];
   cellKind: Props["cellKind"];
+  cellClassName: Props["cellClassName"];
+  cellTitle: Props["cellTitle"];
+  hasMenu: boolean;
   activeCol: string | null;
   editing: Editing | null;
   editorApi: { commit: (text: string, move: [number, number] | null) => boolean; cancel: () => void } | null;
   menu: { render: NonNullable<Props["renderMenu"]>; open: boolean; api: { setMenuOpen: (o: boolean) => void; focusGrid: () => void } } | null;
 };
 
-const GridRow = memo(function GridRow({ rowKey, row, columns, cellText, cellKind, activeCol, editing, editorApi, menu }: RowProps) {
+const GridRow = memo(function GridRow({
+  rowKey, row, columns, cellText, cellKind, cellClassName, cellTitle, hasMenu, activeCol, editing, editorApi, menu,
+}: RowProps) {
   const isNode = row.type === "node";
   const heading = isNode && row.row.kind !== "line" && row.row.kind !== "note";
   const tone = row.type === "grand" ? "font-bold bg-muted" : row.type === "subtotal" ? "font-semibold bg-muted/60" : "";
@@ -312,7 +343,8 @@ const GridRow = memo(function GridRow({ rowKey, row, columns, cellText, cellKind
         const text = cellText(row, c);
         const calculated = isNode && row.row.kind === "line" && c.numeric && !kind.editable;
         return (
-          <td key={c.key} data-row={rowKey} data-col={c.key} data-active={isActive || undefined} title={i === 0 && text.length > 40 ? text : undefined}
+          <td key={c.key} data-row={rowKey} data-col={c.key} data-active={isActive || undefined}
+            title={cellTitle?.(row, c.key) ?? (i === 0 && text.length > 40 ? text : undefined)}
             className={cn(
               "group/cell relative h-7 overflow-hidden border-b px-2 text-ellipsis whitespace-nowrap",
               i === 0
@@ -322,6 +354,7 @@ const GridRow = memo(function GridRow({ rowKey, row, columns, cellText, cellKind
               c.key === "code" && "text-muted-foreground",
               calculated && "bg-muted/30 text-muted-foreground",
               row.row.kind === "note" && isNode && "italic text-muted-foreground",
+              cellClassName?.(row, c.key),
               isActive && "outline-2 -outline-offset-2 outline-primary",
             )}
             style={i === 0 ? { paddingLeft: 8 + row.depth * 14 } : undefined}>
@@ -335,7 +368,7 @@ const GridRow = memo(function GridRow({ rowKey, row, columns, cellText, cellKind
             {i === 0 && menu && (
               <span className="absolute top-0.5 right-0.5 bg-background">{menu.render(row, menu.open, menu.api.setMenuOpen, menu.api.focusGrid)}</span>
             )}
-            {i === 0 && isNode && !menu && (
+            {i === 0 && isNode && hasMenu && !menu && (
               // plain text button (no handlers; the grid's mousedown delegate opens the real menu); shown on hover or when the cell is active
               <button type="button" data-row-menu tabIndex={-1} aria-label={`Row actions for ${row.label}`}
                 className="absolute top-0.5 right-0.5 flex size-6 items-center justify-center rounded bg-background text-muted-foreground opacity-0 group-hover/row:opacity-100 group-data-active/cell:opacity-100 hover:bg-muted">

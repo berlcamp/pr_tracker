@@ -2,7 +2,7 @@
 // SAAO workspace (spec §8.3): the live book as an Excel-like grid. Edits are optimistic: they are
 // applied locally as pending edits on top of the last server data, sent with the single-cell
 // actions (paste: one applyBatch), dropped once fresh server data arrives, and rolled back on error.
-import { useCallback, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { Loader2, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
@@ -10,17 +10,19 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
 import { resolveLabels, saaoColumns } from "@/components/saao/columns";
+import { CutoffSelect } from "@/components/saao/cutoff-select";
 import { EditableGrid, rowKeyOf, type CellKind, type CellPos, type FocusRequest, type GridColumn } from "@/components/saao/editable-grid";
 import { FinalizeDialog, type FinalizeWarnings } from "@/components/saao/finalize-dialog";
 import { PastePreviewDialog, type PastePreview } from "@/components/saao/paste-preview-dialog";
 import { StructureMenu } from "@/components/saao/structure-menu";
+import { usePendingEdits } from "@/components/saao/use-pending-edits";
 import type { ActionResult } from "@/lib/actions/rpc";
 import type { CalcContext } from "@/lib/saao/calc";
-import { applyLocalEdit, buildEditorRows, childrenIndex, editFromChange, type LocalEdit } from "@/lib/saao/editor-state";
+import { buildEditorRows, childrenIndex, editFromChange, type LocalEdit } from "@/lib/saao/editor-state";
+import { monthEnd, monthEndLabel } from "@/lib/saao/cutoff";
 import { formatAmount, formatPct, fromNumeric, parseAmount } from "@/lib/saao/money";
 import {
   changesToOps, EXTRA_FIELDS, isBalanceWord, parseClipboard, planCell, planPaste, sbNumberOfCol,
@@ -39,11 +41,6 @@ type BookInfo = {
   allotmentMode: AllotmentMode; movementRule: MovementRule; extraLabels: unknown;
 };
 type WsColumn = GridColumn & { get?: (a: LineAmounts) => number };
-type PendingEdit = { id: number; edit: LocalEdit; done: boolean };
-
-const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const pad = (n: number) => String(n).padStart(2, "0");
-const monthEnd = (fy: number, m: number) => `${fy}-${pad(m)}-${pad(new Date(Date.UTC(fy, m, 0)).getUTCDate())}`;
 const NO_KIND: CellKind = { editable: false };
 
 /** What a typed value means for a node kind and column (see PasteChange for the column keys). */
@@ -126,19 +123,11 @@ export function Workspace({ book, data, reports, offices, initialMonth, canFinal
   canFinalize: boolean;
 }) {
   // ---- data: last server data + pending optimistic edits ----
-  const [base, setBase] = useState(data);
-  const [pending, setPending] = useState<PendingEdit[]>([]);
-  if (data !== base) {
-    // fresh server data (every successful action revalidates /budget): it includes finished edits
-    setBase(data);
-    setPending((p) => p.filter((e) => !e.done));
-  }
-  const live = useMemo(() => pending.reduce((d, p) => applyLocalEdit(d, p.edit), base), [base, pending]);
-  const pendingSeq = useRef(0);
+  const { live, saving, addPending, settle } = usePendingEdits(data);
 
   const [month, setMonth] = useState(initialMonth);
   const cutoff = monthEnd(book.fiscalYear, month);
-  const cutoffLabel = `${MONTHS[month - 1]} ${new Date(Date.UTC(book.fiscalYear, month, 0)).getUTCDate()}, ${book.fiscalYear}`;
+  const cutoffLabel = monthEndLabel(book.fiscalYear, month);
   const ctx = useMemo<CalcContext>(() => ({ cutoff, allotmentMode: book.allotmentMode, movementRule: book.movementRule }),
     [cutoff, book.allotmentMode, book.movementRule]);
 
@@ -199,21 +188,6 @@ export function Workspace({ book, data, reports, offices, initialMonth, canFinal
   }, [nodeById, lineAmount, sbMovementIds, extraOf]);
 
   // ---- saving ----
-  const settle = useCallback((ids: number[], res: ActionResult<unknown>) => {
-    if (res.ok) {
-      setPending((p) => p.map((e) => (ids.includes(e.id) ? { ...e, done: true } : e)));
-    } else {
-      toast.error(res.error);
-      setPending((p) => p.filter((e) => !ids.includes(e.id)));
-    }
-  }, []);
-
-  const addPending = useCallback((edits: LocalEdit[]) => {
-    const ids = edits.map(() => ++pendingSeq.current);
-    setPending((p) => [...p, ...edits.map((edit, i) => ({ id: ids[i], edit, done: false }))]);
-    return ids;
-  }, []);
-
   /** Sends one change with its single-cell action (the op shape is shared with paste). */
   const sendChange = useCallback((change: PasteChange): Promise<ActionResult<unknown>> => {
     const op = changesToOps([change], { sbMovementIds, bookId: book.id })[0] as Record<string, never>;
@@ -361,8 +335,7 @@ export function Workspace({ book, data, reports, offices, initialMonth, canFinal
     };
   }, [reportRows]);
 
-  function changeMonth(v: string) {
-    const m = Number(v);
+  function changeMonth(m: number) {
     setMonth(m);
     window.history.replaceState(null, "", `?month=${m}`);
   }
@@ -380,25 +353,11 @@ export function Workspace({ book, data, reports, offices, initialMonth, canFinal
   const sbInitial = { referenceNo: "", date: cutoff, title: "" };
   const [sbForm, setSbForm] = useState(sbInitial);
 
-  const saving = pending.some((p) => !p.done);
-
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <h1 className="text-2xl font-semibold">SAAO Reports</h1>
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-muted-foreground">As of</span>
-          <Select value={String(month)} onValueChange={changeMonth}>
-            <SelectTrigger aria-label="As of month" className="w-52"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {MONTHS.map((name, i) => (
-                <SelectItem key={name} value={String(i + 1)}>
-                  {name} {new Date(Date.UTC(book.fiscalYear, i + 1, 0)).getUTCDate()}, {book.fiscalYear}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <CutoffSelect fiscalYear={book.fiscalYear} month={month} onChange={changeMonth} />
         <div className="flex items-center gap-2 text-sm" aria-label="Report state">
           {draft && <Badge className="bg-amber-100 text-amber-900">Draft v{draft.version}</Badge>}
           {finalized && <Badge className="bg-green-100 text-green-900">Finalized v{finalized.version}</Badge>}

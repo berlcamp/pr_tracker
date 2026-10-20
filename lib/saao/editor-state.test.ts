@@ -145,5 +145,9 @@ describe("editFromChange", () => {
       .toEqual({ kind: "node", id: "l1", patch: { account_code: null } });
     expect(editFromChange({ nodeId: "l1", colKey: "m3", from: "", to: "1+2", centavos: 300, entry: "1+2" }, sb))
       .toEqual({ kind: "obligation", nodeId: "l1", month: 3, centavos: 300, entry: "1+2" });
+    expect(editFromChange({ nodeId: "l1", colKey: "appropriation_ref", from: "", to: " AB 2026-1 " }, sb))
+      .toEqual({ kind: "node", id: "l1", patch: { appropriation_ref: "AB 2026-1" } });
+    expect(editFromChange({ nodeId: "l1", colKey: "appropriation_ref", from: "x", to: "  " }, sb))
+      .toEqual({ kind: "node", id: "l1", patch: { appropriation_ref: null } });
   });
 });

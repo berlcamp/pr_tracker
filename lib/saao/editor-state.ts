@@ -9,7 +9,7 @@ import type { MovementKind, NodeKind, RecordStatus, ReportRow } from "./types";
 type Node = EditorData["nodes"][number];
 
 export type LocalEdit =
-  | { kind: "node"; id: string; patch: Partial<Pick<Node, "label" | "account_code">> }
+  | { kind: "node"; id: string; patch: Partial<Pick<Node, "label" | "account_code" | "appropriation_ref">> }
   | { kind: "appropriation"; nodeId: string; centavos: number }
   | { kind: "movement_line"; movementId: string; nodeId: string; centavos: number }
   | { kind: "extra"; nodeId: string; field: ExtraField; mode: "balance" | "amount" | null; centavos: number | null }
@@ -134,6 +134,7 @@ export function editFromChange(ch: PasteChange, sbMovementIds: Record<string, st
   if (ch.colKey === "label") return { kind: "node", id: ch.nodeId, patch: { label: ch.to.trim() } };
   if (ch.colKey === "code") return { kind: "node", id: ch.nodeId, patch: { account_code: ch.to.trim() || null } };
   if (ch.colKey === "appropriation") return { kind: "appropriation", nodeId: ch.nodeId, centavos: ch.centavos ?? 0 };
+  if (ch.colKey === "appropriation_ref") return { kind: "node", id: ch.nodeId, patch: { appropriation_ref: ch.to.trim() || null } };
   const sb = sbNumberOfCol(ch.colKey);
   if (sb !== null) {
     const movementId = sbMovementIds[String(sb)];
