@@ -22,3 +22,18 @@ export async function openSignedUrl(getUrl: () => Promise<ActionResult<string>>)
   if (win) win.location.href = res.data;
   else window.open(res.data, "_blank", "noopener");
 }
+
+/** Saves a file whose signed URL forces a download. Same-window navigation needs no popup and leaves no blank tab. */
+export async function downloadSignedUrl(getUrl: () => Promise<ActionResult<string>>) {
+  let res: ActionResult<string>;
+  try {
+    res = await getUrl();
+  } catch {
+    res = { ok: false, error: "Could not download the file. Please try again." };
+  }
+  if (!res.ok) {
+    toast.error(res.error);
+    return;
+  }
+  window.location.assign(res.data);
+}

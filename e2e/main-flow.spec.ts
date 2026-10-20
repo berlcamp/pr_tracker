@@ -29,6 +29,11 @@ test("PR travels the full default route and is completed by the Treasurer", asyn
   }
 
   const treas = pages.treas;
+  await expect(treas.getByText('Set the status to "Paid" before completing this PR.')).toBeVisible();
+  await treas.getByRole("button", { name: "Update status" }).click();
+  await treas.getByRole("dialog").getByRole("combobox", { name: "Status" }).click();
+  await treas.getByRole("option", { name: "Paid" }).click();
+  await confirm(treas, "Update status");
   await treas.getByRole("button", { name: "Complete" }).click();
   await confirm(treas, "Complete");
   await expect(treas.getByTestId("location-line")).toHaveText("Completed at City Treasurer's Office");

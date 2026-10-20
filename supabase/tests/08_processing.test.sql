@@ -1,5 +1,5 @@
 begin;
-select plan(17);
+select plan(18);
 
 select tests.make_user('pc@x.test', 'CSWD');
 select tests.make_user('pg@x.test', 'GSO');
@@ -59,6 +59,10 @@ select is((select payload ->> 'new' from pr_tracker.pr_events where pr_id = curr
 select pr_tracker.forward_pr(current_setting('tests.pr')::uuid, (select id from pr_tracker.offices where code = 'TREAS'), 'Fast track');
 select tests.clear_authentication(); select tests.authenticate_as('pt@x.test');
 select pr_tracker.receive_pr(current_setting('tests.pr')::uuid);
+select throws_like(format('select pr_tracker.complete_pr(%L)', current_setting('tests.pr')),
+                   'Set the status to "Paid" before completing this PR', 'cannot complete before payment');
+select pr_tracker.set_status(current_setting('tests.pr')::uuid,
+  (select s.id from pr_tracker.office_statuses s join pr_tracker.offices o on o.id = s.office_id where o.code = 'TREAS' and s.label = 'Paid'));
 select lives_ok(format('select pr_tracker.complete_pr(%L, %L)', current_setting('tests.pr'), 'Paid'), 'Treasurer completes');
 select is((select movement_state::text from pr_tracker.purchase_requests where id = current_setting('tests.pr')::uuid),
           'completed', 'state completed');

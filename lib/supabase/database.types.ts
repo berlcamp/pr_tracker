@@ -159,6 +159,7 @@ export type Database = {
       office_statuses: {
         Row: {
           active: boolean
+          allows_completion: boolean
           id: string
           label: string
           office_id: string
@@ -166,6 +167,7 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          allows_completion?: boolean
           id?: string
           label: string
           office_id: string
@@ -173,6 +175,7 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          allows_completion?: boolean
           id?: string
           label?: string
           office_id?: string
@@ -1078,6 +1081,7 @@ export type Database = {
         Args: { p_body: string; p_pr_id: string }
         Returns: undefined
       }
+      admin_delete_status: { Args: { p_id: string }; Returns: undefined }
       admin_set_route: { Args: { p_steps: Json }; Returns: undefined }
       admin_set_setting: {
         Args: { p_key: string; p_value: Json }
@@ -1111,6 +1115,7 @@ export type Database = {
       admin_upsert_status: {
         Args: {
           p_active: boolean
+          p_allows_completion?: boolean
           p_id: string
           p_label: string
           p_office_id: string

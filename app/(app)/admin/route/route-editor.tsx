@@ -13,8 +13,8 @@ import { saveRoute } from "../actions";
 type Office = { id: string; name: string };
 type Step = { key: string; office_id: string; purpose: string };
 
-function SortableStep({ step, index, offices, onChange, onRemove }: {
-  step: Step; index: number; offices: Office[]; onChange: (s: Step) => void; onRemove: () => void;
+function SortableStep({ step, index, officeName, offices, onChange, onRemove }: {
+  step: Step; index: number; officeName: string; offices: Office[]; onChange: (s: Step) => void; onRemove: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: step.key });
   return (
@@ -27,7 +27,14 @@ function SortableStep({ step, index, offices, onChange, onRemove }: {
         <SelectContent>{offices.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}</SelectContent>
       </Select>
       <Input aria-label={`Step ${index + 1} purpose`} value={step.purpose} onChange={(e) => onChange({ ...step, purpose: e.target.value })} placeholder="Purpose, e.g. For approval" />
-      <Button type="button" variant="ghost" size="icon" aria-label={`Remove step ${index + 1}`} onClick={onRemove}><Trash2 className="size-4" /></Button>
+      <ConfirmActionDialog
+        trigger={<Button type="button" variant="ghost" size="icon" aria-label={`Remove step ${index + 1}`}><Trash2 className="size-4" /></Button>}
+        title={`Remove step ${index + 1}?`}
+        description={<p>{step.office_id ? <b>{officeName}</b> : "This step"}{step.purpose.trim() ? ` · ${step.purpose.trim()}` : ""} will be
+          taken off the route. The change takes effect only after you click <b>Save route</b>.</p>}
+        confirmLabel="Remove step" destructive successMessage="Step removed. Save the route to apply it."
+        onConfirm={async () => { onRemove(); return { ok: true as const, data: null }; }}
+      />
     </li>
   );
 }
@@ -50,7 +57,7 @@ export function RouteEditor({ initial, offices }: { initial: { id: string; offic
         <SortableContext items={steps.map((s) => s.key)} strategy={verticalListSortingStrategy}>
           <ol className="space-y-2">
             {steps.map((s, i) => (
-              <SortableStep key={s.key} step={s} index={i} offices={offices}
+              <SortableStep key={s.key} step={s} index={i} officeName={name(s.office_id)} offices={offices}
                 onChange={(n) => setSteps((all) => all.map((x) => (x.key === s.key ? n : x)))}
                 onRemove={() => setSteps((all) => all.filter((x) => x.key !== s.key))} />
             ))}

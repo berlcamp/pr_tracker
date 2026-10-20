@@ -51,7 +51,7 @@ export default async function PrDetailPage({ params }: { params: Promise<{ id: s
     actions.has("forward") ? supabase.rpc("suggest_next_step", { p_pr_id: id }) : Promise.resolve({ data: null }),
     supabase.from("offices").select("id, name").eq("active", true).order("name"),
     supabase.from("pr_involved_offices").select("office_id, office:offices(name)").eq("pr_id", id),
-    officeId ? supabase.from("office_statuses").select("id, label").eq("office_id", officeId).eq("active", true).order("sort_order") : empty,
+    officeId ? supabase.from("office_statuses").select("id, label, allows_completion").eq("office_id", officeId).eq("active", true).order("sort_order") : empty,
     officeId ? supabase.from("pr_followers").select("office_id").eq("pr_id", id).eq("office_id", officeId) : empty,
   ]);
   const suggestion = ((suggestionRes.data as { next?: unknown } | null)?.next ?? null) as Suggestion;
@@ -66,7 +66,8 @@ export default async function PrDetailPage({ params }: { params: Promise<{ id: s
         <PrActionBar
           pr={{ id, routing_slip_no: pr.routing_slip_no!, pr_no: pr.pr_no, mode_of_procurement: pr.mode_of_procurement,
                 current_office_name: pr.current_office_name!, sent_by_office_name: pr.sent_by_office_name, total_steps: pr.total_steps ?? 0,
-                has_pr_document: !!pr.has_pr_document }}
+                has_pr_document: !!pr.has_pr_document, current_status_id: pr.current_status_id,
+                current_status_label: pr.current_status_label }}
           actions={actionList} suggestion={suggestion}
           offices={officesRes.data ?? []} returnTargets={returnTargets} statuses={statusesRes.data ?? []}
           myOfficeId={officeId ?? null} myOfficeName={profile.office?.name ?? null}

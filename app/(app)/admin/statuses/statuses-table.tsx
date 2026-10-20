@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Pencil, Plus } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -11,17 +11,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
 import { DataTable } from "@/components/data-table/data-table";
 import type { OfficeStatusRow } from "@/lib/supabase/rows";
-import { saveStatus, type StatusInput } from "../actions";
+import { deleteStatus, saveStatus, type StatusInput } from "../actions";
 
 function StatusDialog({ officeId, officeName, status, trigger }: { officeId: string; officeName: string; status: OfficeStatusRow | null; trigger: React.ReactNode }) {
   const init: StatusInput = status
-    ? { id: status.id, office_id: officeId, label: status.label, sort_order: status.sort_order, active: status.active }
-    : { id: null, office_id: officeId, label: "", sort_order: 0, active: true };
+    ? { id: status.id, office_id: officeId, label: status.label, sort_order: status.sort_order, active: status.active, allows_completion: status.allows_completion }
+    : { id: null, office_id: officeId, label: "", sort_order: 0, active: true, allows_completion: false };
   const [v, setV] = useState(init);
   return (
     <ConfirmActionDialog trigger={trigger}
       title={status ? `Save status "${status.label}"?` : `Add a status for ${officeName}?`}
-      description="Statuses can be deactivated but not deleted, because past events refer to them."
+      description="A status that has been used on a PR cannot be deleted, only deactivated, because past events refer to it."
       confirmLabel="Save status" successMessage="Status saved" canConfirm={v.label.trim().length > 0}
       onOpenChange={(o) => o && setV(init)} onConfirm={() => saveStatus(v)}>
       <Label htmlFor="s-label">Label</Label>
@@ -29,6 +29,11 @@ function StatusDialog({ officeId, officeName, status, trigger }: { officeId: str
       <Label htmlFor="s-order">Sort order</Label>
       <Input id="s-order" type="number" value={v.sort_order} onChange={(e) => setV({ ...v, sort_order: Number(e.target.value) || 0 })} />
       <label className="flex items-center gap-2 text-sm"><Checkbox checked={v.active} onCheckedChange={(c) => setV({ ...v, active: !!c })} />Active</label>
+      <label className="flex items-start gap-2 text-sm">
+        <Checkbox className="mt-0.5" checked={v.allows_completion} onCheckedChange={(c) => setV({ ...v, allows_completion: !!c })} />
+        <span>Final status<span className="block text-xs text-muted-foreground">
+          If any status of an office is final, that office can complete a PR only while it is at a final status (e.g. Paid).</span></span>
+      </label>
     </ConfirmActionDialog>
   );
 }
@@ -41,9 +46,19 @@ export function StatusesTable({ offices, officeId, statuses }: { offices: { id: 
     { accessorKey: "sort_order", header: "Order" },
     { accessorKey: "label", header: "Label" },
     { accessorKey: "active", header: "Active", cell: ({ row }) => (row.original.active ? "Yes" : "No") },
+    { accessorKey: "allows_completion", header: "Final", cell: ({ row }) => (row.original.allows_completion ? "Yes" : "No") },
     { id: "edit", header: "", enableHiding: false, cell: ({ row }) => (
-      <StatusDialog officeId={officeId} officeName={officeName} status={row.original}
-        trigger={<Button variant="ghost" size="sm"><Pencil className="mr-1 size-4" />Edit</Button>} />) },
+      <div className="flex justify-end gap-1">
+        <StatusDialog officeId={officeId} officeName={officeName} status={row.original}
+          trigger={<Button variant="ghost" size="sm"><Pencil className="mr-1 size-4" />Edit</Button>} />
+        <ConfirmActionDialog
+          trigger={<Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="mr-1 size-4" />Delete</Button>}
+          title={`Delete status "${row.original.label}"?`}
+          description="This cannot be undone. A status that has been used on a PR cannot be deleted; deactivate it instead."
+          confirmLabel="Delete status" destructive successMessage="Status deleted"
+          onConfirm={() => deleteStatus(row.original.id)}
+        />
+      </div>) },
   ];
   return (
     <DataTable columns={columns} data={statuses} searchPlaceholder="Filter statuses…"

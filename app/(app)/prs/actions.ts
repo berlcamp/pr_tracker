@@ -24,11 +24,12 @@ export async function registerAttachment(
   }, [`/prs/${prId}`, "/"]);
 }
 
-export async function getAttachmentUrl(attachmentId: string): Promise<ActionResult<string>> {
+/** Signed link to an attachment. `download` forces a save under the original filename instead of opening it inline. */
+export async function getAttachmentUrl(attachmentId: string, download = false): Promise<ActionResult<string>> {
   const supabase = await createClient();
   const { data: att } = await supabase.from("pr_attachments").select("storage_path, filename").eq("id", attachmentId).maybeSingle();
   if (!att) return { ok: false, error: "Attachment not found" };
-  const { data, error } = await supabase.storage.from("pr-tracker-attachments").createSignedUrl(att.storage_path, 60);
+  const { data, error } = await supabase.storage.from("pr-tracker-attachments").createSignedUrl(att.storage_path, 60, download ? { download: att.filename } : undefined);
   if (error || !data) return { ok: false, error: error?.message ?? "Could not create link" };
   return { ok: true, data: data.signedUrl };
 }

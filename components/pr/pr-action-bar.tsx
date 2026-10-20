@@ -19,12 +19,13 @@ export type Suggestion = { step_order: number; office_id: string; office_name: s
 
 type Props = {
   pr: { id: string; routing_slip_no: string; pr_no: string | null; mode_of_procurement: string | null;
-        current_office_name: string; sent_by_office_name: string | null; total_steps: number; has_pr_document: boolean };
+        current_office_name: string; sent_by_office_name: string | null; total_steps: number; has_pr_document: boolean;
+        current_status_id: string | null; current_status_label: string | null };
   actions: PrAction[];
   suggestion: Suggestion;
   offices: Option[];
   returnTargets: Option[];
-  statuses: { id: string; label: string }[];
+  statuses: { id: string; label: string; allows_completion: boolean }[];
   myOfficeId: string | null;
   myOfficeName: string | null;
   isFollowing: boolean;
@@ -36,6 +37,9 @@ const MODES = ["Competitive Bidding", "Small Value Procurement", "Shopping", "Di
 
 export function PrActionBar(p: Props) {
   const has = (a: PrAction) => p.actions.includes(a);
+  // Mirrors complete_pr: an office with final statuses (e.g. Paid) completes only from one of them.
+  const finalStatuses = p.statuses.filter((s) => s.allows_completion);
+  const completeBlocked = finalStatuses.length > 0 && !finalStatuses.some((s) => s.id === p.pr.current_status_id);
   return (
     <div className="flex flex-wrap items-center gap-2 border-t pt-4">
       {has("upload_pr_document") && !p.pr.has_pr_document && (
@@ -74,7 +78,15 @@ export function PrActionBar(p: Props) {
           onConfirm={(t) => recallPr(p.pr.id, t || null)}
         />
       )}
-      {has("complete") && (
+      {has("complete") && completeBlocked && (
+        <>
+          <Button disabled className="bg-emerald-600"><CheckCircle2 className="mr-2 size-4" />Complete</Button>
+          <p className="w-full text-sm text-amber-700 sm:order-last">
+            Set the status to {finalStatuses.map((s) => `"${s.label}"`).join(" or ")} before completing this PR.
+          </p>
+        </>
+      )}
+      {has("complete") && !completeBlocked && (
         <TextActionDialog
           trigger={<Button className="bg-emerald-600 hover:bg-emerald-700"><CheckCircle2 className="mr-2 size-4" />Complete</Button>}
           title={`Mark ${p.pr.routing_slip_no} as completed?`}
@@ -172,23 +184,31 @@ function ReturnDialog({ pr, returnTargets }: Props) {
 }
 
 function StatusDialog({ pr, statuses }: Props) {
-  const [statusId, setStatusId] = useState("");
+  const current = pr.current_status_id;
+  const [statusId, setStatusId] = useState(current ?? "");
   const [remark, setRemark] = useState("");
   const label = statuses.find((s) => s.id === statusId)?.label;
+  const changed = !!statusId && statusId !== current;
   return (
     <ConfirmActionDialog
       trigger={<Button variant="outline"><ListChecks className="mr-2 size-4" />Update status</Button>}
       title={`Update status of ${pr.routing_slip_no}?`}
-      description={label ? <p>Set the processing status to <b>{label}</b>. Followers will be notified.</p> : "Choose a status from your office's list."}
+      description={<>
+        <p>Current status: <b>{pr.current_status_label ?? "none yet"}</b></p>
+        {changed ? <p>Set the processing status to <b>{label}</b>. Followers will be notified.</p>
+                 : <p>Choose a new status from your office&apos;s list.</p>}
+      </>}
       confirmLabel="Update status" successMessage="Status updated"
-      canConfirm={!!statusId}
-      onOpenChange={(o) => { if (o) { setStatusId(""); setRemark(""); } }}
+      canConfirm={changed}
+      onOpenChange={(o) => { if (o) { setStatusId(current ?? ""); setRemark(""); } }}
       onConfirm={() => setStatus(pr.id, statusId, remark.trim() || null)}
     >
       <Label>Status</Label>
       <Select value={statusId} onValueChange={setStatusId}>
         <SelectTrigger aria-label="Status"><SelectValue placeholder="Select status" /></SelectTrigger>
-        <SelectContent>{statuses.map((s) => <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>)}</SelectContent>
+        <SelectContent>{statuses.map((s) => (
+          <SelectItem key={s.id} value={s.id}>{s.label}{s.id === current ? " (current)" : ""}</SelectItem>
+        ))}</SelectContent>
       </Select>
       <Label htmlFor="status-remark">Remark (optional)</Label>
       <Textarea id="status-remark" rows={2} value={remark} onChange={(e) => setRemark(e.target.value)} />

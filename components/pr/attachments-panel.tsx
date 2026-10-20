@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Download, Paperclip } from "lucide-react";
+import { Download, ExternalLink, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +13,7 @@ import { validateFile } from "@/lib/pr/files";
 import { uploadAttachment } from "@/lib/pr/upload-client";
 import { formatDateTime } from "@/lib/format";
 import { getAttachmentUrl } from "@/app/(app)/prs/actions";
-import { openSignedUrl } from "@/lib/pr/open-signed-url";
+import { downloadSignedUrl, openSignedUrl } from "@/lib/pr/open-signed-url";
 import { supersedeAttachment } from "@/app/(app)/prs/[id]/actions";
 
 export type AttachmentItem = {
@@ -21,6 +21,9 @@ export type AttachmentItem = {
   superseded_at: string | null; superseded_reason: string | null; office_id: string; is_pr_document: boolean;
   uploader: { full_name: string } | null; office: { name: string } | null;
 };
+
+/** Types a browser can display in a tab; Word and Excel files can only be downloaded. */
+const INLINE_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
 
 export function AttachmentsPanel({ prId, attachments, canUpload, myOfficeId, maxMb }: {
   prId: string; attachments: AttachmentItem[]; canUpload: boolean; myOfficeId: string | null; maxMb: number;
@@ -33,8 +36,11 @@ export function AttachmentsPanel({ prId, attachments, canUpload, myOfficeId, max
     return uploadAttachment(prId, file, maxMb, false);
   }
 
-  function download(id: string) {
+  function view(id: string) {
     return openSignedUrl(() => getAttachmentUrl(id));
+  }
+  function download(id: string) {
+    return downloadSignedUrl(() => getAttachmentUrl(id, true));
   }
 
   const columns: ColumnDef<AttachmentItem>[] = [
@@ -51,6 +57,9 @@ export function AttachmentsPanel({ prId, attachments, canUpload, myOfficeId, max
       ? <Badge variant="outline" title={row.original.superseded_reason ?? ""}>Superseded</Badge> : <Badge variant="secondary">Current</Badge> },
     { id: "actions", header: "", enableHiding: false, cell: ({ row }) => (
       <div className="flex justify-end gap-1">
+        {INLINE_TYPES.has(row.original.mime_type) && (
+          <Button variant="ghost" size="sm" onClick={() => view(row.original.id)}><ExternalLink className="mr-1 size-4" />View</Button>
+        )}
         <Button variant="ghost" size="sm" onClick={() => download(row.original.id)}><Download className="mr-1 size-4" />Download</Button>
         {!row.original.superseded_at && !row.original.is_pr_document && row.original.office_id === myOfficeId && (
           <TextActionDialog

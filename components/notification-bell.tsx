@@ -4,7 +4,6 @@ import { useRouter } from "next/navigation";
 import { Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { notificationText } from "@/lib/pr/timeline";
 import { formatDateTime } from "@/lib/format";
 import type { EventType } from "@/lib/types";
@@ -60,7 +59,7 @@ export function NotificationBell() {
           <Button variant="link" size="sm" disabled={unread === 0}
                   onClick={async () => { await markAllNotificationsRead(); refresh(); }}>Mark all as read</Button>
         </div>
-        <ScrollArea className="max-h-96">
+        <div className="max-h-96 overflow-y-auto overscroll-contain">
           {items.length === 0 && <p className="p-4 text-sm text-muted-foreground">No notifications.</p>}
           <ul>
             {items.map((n) => (
@@ -74,7 +73,7 @@ export function NotificationBell() {
               </li>
             ))}
           </ul>
-        </ScrollArea>
+        </div>
       </PopoverContent>
     </Popover>
   );

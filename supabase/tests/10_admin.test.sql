@@ -1,5 +1,5 @@
 begin;
-select plan(10);
+select plan(14);
 
 select tests.make_user('ad@x.test', 'GSO', 'admin');
 select tests.make_user('st@x.test', 'GSO');
@@ -27,6 +27,25 @@ select lives_ok(format($$select pr_tracker.admin_set_route(jsonb_build_array(
                  (select id from pr_tracker.offices where code = 'GSO'), (select id from pr_tracker.offices where code = 'MAYOR')),
                 'route replaced');
 select is((select count(*)::int from pr_tracker.default_route_steps), 2, 'route has 2 steps');
+select set_config('tests.status', pr_tracker.admin_upsert_status(null, (select id from pr_tracker.offices where code = 'GSO'),
+                  'Temporary', 9, true)::text, true);
+select lives_ok(format('select pr_tracker.admin_delete_status(%L)', current_setting('tests.status')), 'unused status deleted');
+select ok(not exists (select 1 from pr_tracker.office_statuses where id = current_setting('tests.status')::uuid), 'status gone');
+
+-- a status a PR currently carries cannot be deleted
+select tests.clear_authentication(); select tests.authenticate_as('st@x.test');
+select set_config('tests.pr', pr_tracker.create_pr(tests.sample_header())::text, true);
+select tests.clear_authentication();
+update pr_tracker.purchase_requests set current_status_id = (select s.id from pr_tracker.office_statuses s
+  join pr_tracker.offices o on o.id = s.office_id where o.code = 'GSO' and s.label = 'For review')
+ where id = current_setting('tests.pr')::uuid;
+select tests.authenticate_as('ad@x.test');
+select throws_like(format('select pr_tracker.admin_delete_status(%L)', (select s.id from pr_tracker.office_statuses s
+                     join pr_tracker.offices o on o.id = s.office_id where o.code = 'GSO' and s.label = 'For review')),
+                   'This status has already been used on a PR%', 'used status cannot be deleted');
+select tests.clear_authentication(); select tests.authenticate_as('st@x.test');
+select throws_like(format('select pr_tracker.admin_delete_status(%L)', (select id from pr_tracker.office_statuses limit 1)),
+                   'Administrator access required', 'staff cannot delete statuses');
 
 select tests.clear_authentication(); select tests.authenticate_as('berlcamp@gmail.com');
 select isnt(pr_tracker.admin_upsert_profile(null, 'admin2@x.test', 'Admin Two', null, null, 'admin', true), null,
