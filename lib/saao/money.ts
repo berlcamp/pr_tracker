@@ -7,12 +7,13 @@ export type ParseResult = { ok: true; centavos: number; entry: string | null } |
 const MAX_PESOS_DIGITS = 13; // 1e13 pesos
 const MAX_CENTAVOS = 10 ** (MAX_PESOS_DIGITS + 2);
 
-const TERM = /^(\d+)(?:\.(\d*))?$|^\.(\d+)$/;
+// Integer part: plain digits, or digits grouped by thousands separators (1,234,567).
+const TERM = /^(\d+|\d{1,3}(?:,\d{3})+)(?:\.(\d*))?$|^\.(\d+)$/;
 
 function termToCentavos(term: string): number | "decimals" | "invalid" | "large" {
   const m = TERM.exec(term);
   if (!m) return "invalid";
-  const int = m[1] ?? "0";
+  const int = (m[1] ?? "0").replace(/,/g, "");
   const frac = m[2] ?? m[3] ?? "";
   if (frac.length > 2) return "decimals";
   if (int.replace(/^0+/, "").length > MAX_PESOS_DIGITS) return "large";
@@ -29,8 +30,10 @@ export function parseAmount(input: string): ParseResult {
     s = s.slice(1).trim();
     if (s === "") return { ok: false, error: "Amount must be a number" };
   }
-  s = s.replace(/[\s,]/g, "");
   if (s === "") return { ok: true, centavos: 0, entry: null };
+  // Whitespace is allowed only around operators and parentheses; between digits it is an error.
+  s = s.replace(/\s*([+\-()])\s*/g, "$1");
+  if (/\s/.test(s)) return { ok: false, error: "Amount must be a number" };
 
   let negate = false;
   const paren = /^\((.*)\)$/.exec(s);
@@ -67,7 +70,8 @@ export function parseAmount(input: string): ParseResult {
 
   const centavos = (negate ? -total : total) || 0;
   const hasOperator = parts.length > 1;
-  return { ok: true, centavos, entry: hasOperator ? (paren ? `(${s})` : s) : null };
+  const expr = s.replace(/,/g, "");
+  return { ok: true, centavos, entry: hasOperator ? (paren ? `(${expr})` : expr) : null };
 }
 
 /** 123450 → "1,234.50"; negative amounts get a leading "-". */

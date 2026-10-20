@@ -2,7 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import type {
-  SaaoAllotmentRow, SaaoBookRow, SaaoLineExtraRow, SaaoMovementLineRow, SaaoMovementRow, SaaoNodeRow,
+  SaaoAllotmentRow, SaaoBookRow, SaaoClassificationRow, SaaoLineExtraRow, SaaoMovementLineRow, SaaoMovementRow, SaaoNodeRow,
   SaaoObligationRow, SaaoReportRow,
 } from "@/lib/supabase/rows";
 import { fromNumeric } from "./money";
@@ -12,6 +12,20 @@ type Num = string | number | null;
 type Json = Record<string, unknown>;
 
 const num = (v: unknown) => fromNumeric(v as Num);
+
+/** PostgREST caps every response at max_rows (1000 in supabase/config.toml and Supabase's default). */
+const PAGE = 1000;
+
+/** Reads every page of an ordered query; `page(from, to)` must apply a stable order and .range(from, to). */
+async function fetchAll<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await page(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    out.push(...(data ?? []));
+    if (!data || data.length < PAGE) return out;
+  }
+}
 
 /** Maps a snapshot row / saao_live_rows element (snake_case, numerics as string or number) to a ReportRow in centavos. */
 export function toReportRow(json: unknown): ReportRow {
@@ -75,20 +89,23 @@ export async function getReport(id: string): Promise<SaaoReportRow | null> {
 /** Snapshot rows of a report in tree order. */
 export async function getReportRows(reportId: string): Promise<ReportRow[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase.from("saao_report_rows").select("*").eq("report_id", reportId).order("seq");
-  if (error) throw new Error(error.message);
-  return (data ?? []).map(toReportRow);
+  const rows = await fetchAll((from, to) =>
+    supabase.from("saao_report_rows").select("*").eq("report_id", reportId).order("seq").range(from, to));
+  return rows.map(toReportRow);
 }
 
 /** Live computation for a book at a cutoff date (YYYY-MM-DD). */
 export async function getLiveRows(bookId: string, cutoff: string): Promise<ReportRow[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("saao_live_rows", { p_book_id: bookId, p_cutoff: cutoff });
-  if (error) throw new Error(error.message);
-  return ((data ?? []) as unknown[]).map(toReportRow);
+  // set-returning RPCs are capped by max_rows too; rows come back ordered by seq
+  const rows = await fetchAll<unknown>((from, to) =>
+    supabase.rpc("saao_live_rows", { p_book_id: bookId, p_cutoff: cutoff }).range(from, to));
+  return rows.map(toReportRow);
 }
 
 export type EditorData = {
+  /** Every classification (inactive ones too, since nodes may still reference them). */
+  classifications: SaaoClassificationRow[];
   nodes: SaaoNodeRow[];
   movements: (SaaoMovementRow & { lines: SaaoMovementLineRow[] })[];
   obligations: SaaoObligationRow[];
@@ -99,28 +116,33 @@ export type EditorData = {
 /** Everything the editor and calc.ts need for one book. Nodes are in tree order (sort_order, created_at, id). */
 export async function getEditorData(bookId: string): Promise<EditorData> {
   const supabase = await createClient();
-  const nodesRes = await supabase.from("saao_nodes").select("*").eq("book_id", bookId)
-    .order("sort_order").order("created_at").order("id");
-  const movRes = await supabase.from("saao_movements").select("*, lines:saao_movement_lines(*)").eq("book_id", bookId)
-    .order("effective_date").order("created_at");
-  if (nodesRes.error) throw new Error(nodesRes.error.message);
-  if (movRes.error) throw new Error(movRes.error.message);
-  const nodes = nodesRes.data ?? [];
+  const [nodes, movements, clsRes] = await Promise.all([
+    fetchAll((from, to) => supabase.from("saao_nodes").select("*").eq("book_id", bookId)
+      .order("sort_order").order("created_at").order("id").range(from, to)),
+    fetchAll((from, to) => supabase.from("saao_movements").select("*, lines:saao_movement_lines(*)").eq("book_id", bookId)
+      .order("effective_date").order("created_at").order("id").range(from, to)),
+    supabase.from("saao_classifications").select("*").order("sort_order").order("code"),
+  ]);
+  if (clsRes.error) throw new Error(clsRes.error.message);
   const ids = nodes.map((n) => n.id);
   // Chunk the id list so the request URL stays small for large books.
   const chunks: string[][] = [];
   for (let i = 0; i < ids.length; i += 200) chunks.push(ids.slice(i, i + 200));
+  // each chunk can still exceed max_rows (200 lines x 12 months of obligations), so every chunk is paged
   const [obl, alt, ext] = await Promise.all([
-    Promise.all(chunks.map((c) => supabase.from("saao_obligations").select("*").in("node_id", c))),
-    Promise.all(chunks.map((c) => supabase.from("saao_allotments").select("*").in("node_id", c).order("created_at"))),
-    Promise.all(chunks.map((c) => supabase.from("saao_line_extras").select("*").in("node_id", c))),
+    Promise.all(chunks.map((c) => fetchAll((from, to) =>
+      supabase.from("saao_obligations").select("*").in("node_id", c).order("node_id").order("month").range(from, to)))),
+    Promise.all(chunks.map((c) => fetchAll((from, to) =>
+      supabase.from("saao_allotments").select("*").in("node_id", c).order("created_at").order("id").range(from, to)))),
+    Promise.all(chunks.map((c) => fetchAll((from, to) =>
+      supabase.from("saao_line_extras").select("*").in("node_id", c).order("node_id").order("field").range(from, to)))),
   ]);
-  for (const res of [...obl, ...alt, ...ext]) if (res.error) throw new Error(res.error.message);
   return {
+    classifications: clsRes.data ?? [],
     nodes,
-    movements: movRes.data ?? [],
-    obligations: obl.flatMap((r) => r.data ?? []),
-    allotments: alt.flatMap((r) => r.data ?? []),
-    extras: ext.flatMap((r) => r.data ?? []),
+    movements,
+    obligations: obl.flat(),
+    allotments: alt.flat(),
+    extras: ext.flat(),
   };
 }

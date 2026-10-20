@@ -108,3 +108,8 @@ export async function finalizeReport(reportId: string, acknowledged: string[]) {
 export async function startRevision(reportId: string, reason: string) {
   return call<string>("start_revision", { p_report_id: reportId, p_reason: reason });
 }
+/** Counted movements that are not approved (R11), for the finalize dialog. Read-only, so nothing is revalidated. */
+export async function listUnapprovedMovements(reportId: string) {
+  return rpcAction<{ id: string; reference_no: string | null; title: string | null; kind: string; status: string; status_note: string | null; total: number | string }[]>(
+    "saao_unapproved_movements", { p_report_id: reportId });
+}

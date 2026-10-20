@@ -4,7 +4,8 @@ import { describe, expect, test, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 
-import { toReportRow } from "./queries";
+import { createClient } from "@/lib/supabase/server";
+import { getReportRows, toReportRow } from "./queries";
 
 const line = {
   seq: 3, node_id: "11111111-1111-1111-1111-111111111111", parent_seq: 2, depth: 2, kind: "line",
@@ -46,5 +47,21 @@ describe("toReportRow", () => {
     expect(r.amounts).toBeNull();
     expect(r.parentSeq).toBeNull();
     expect(r.totalLabel).toBe("Total");
+  });
+});
+
+describe("paging past PostgREST max_rows", () => {
+  test("getReportRows reads every 1000-row page", async () => {
+    const all = Array.from({ length: 2345 }, (_, i) => ({ seq: i + 1, parent_seq: null, depth: 0, kind: "note", label: `r${i + 1}`, show_total: true }));
+    const ranges: [number, number][] = [];
+    const builder = {
+      select: () => builder, eq: () => builder, order: () => builder,
+      range: (from: number, to: number) => { ranges.push([from, to]); return Promise.resolve({ data: all.slice(from, to + 1), error: null }); },
+    };
+    vi.mocked(createClient).mockResolvedValue({ from: () => builder } as never);
+    const rows = await getReportRows("r");
+    expect(rows).toHaveLength(2345);
+    expect(rows.at(-1)!.label).toBe("r2345");
+    expect(ranges).toEqual([[0, 999], [1000, 1999], [2000, 2999]]);
   });
 });

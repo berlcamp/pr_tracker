@@ -42,6 +42,31 @@ describe("parseAmount", () => {
     expect(parseAmount("1.2.3")).toEqual(err("Amount must be a number"));
     expect(parseAmount("=")).toEqual(err("Amount must be a number"));
   });
+  test("commas only as thousands separators", () => {
+    expect(parseAmount("1,234,567.89")).toEqual(ok(123456789));
+    expect(parseAmount("12,345")).toEqual(ok(1234500));
+    expect(parseAmount("123,456")).toEqual(ok(12345600));
+    expect(parseAmount("1,5")).toEqual(err("Amount must be a number"));
+    expect(parseAmount("12,34")).toEqual(err("Amount must be a number"));
+    expect(parseAmount(",123")).toEqual(err("Amount must be a number"));
+    expect(parseAmount("1234,567")).toEqual(err("Amount must be a number"));
+    expect(parseAmount("1,234,56")).toEqual(err("Amount must be a number"));
+    expect(parseAmount("1,234.5,6")).toEqual(err("Amount must be a number"));
+    expect(parseAmount("123,")).toEqual(err("Amount must be a number"));
+    expect(parseAmount("1,,234")).toEqual(err("Amount must be a number"));
+    expect(parseAmount("1,000+2,000.50")).toEqual(ok(300050, "1000+2000.50"));
+    expect(parseAmount("(1,234)")).toEqual(ok(-123400));
+  });
+  test("whitespace between digits is rejected; around operators and the ends it is trimmed", () => {
+    expect(parseAmount("1 2")).toEqual(err("Amount must be a number"));
+    expect(parseAmount("1 234.50")).toEqual(err("Amount must be a number"));
+    expect(parseAmount("1.2 5")).toEqual(err("Amount must be a number"));
+    expect(parseAmount("1\t2")).toEqual(err("Amount must be a number"));
+    expect(parseAmount("  1,234.50\t")).toEqual(ok(123450));
+    expect(parseAmount("= 100 + 50")).toEqual(ok(15000, "100+50"));
+    expect(parseAmount("- 5")).toEqual(ok(-500));
+    expect(parseAmount("( 500 )")).toEqual(ok(-50000));
+  });
   test("1e13 or more is too large", () => {
     expect(parseAmount("9999999999999.99")).toEqual(ok(999999999999999));
     expect(parseAmount("10000000000000")).toEqual(err("Amount is too large"));
