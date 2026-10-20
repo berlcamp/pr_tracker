@@ -146,3 +146,26 @@ export async function getEditorData(bookId: string): Promise<EditorData> {
     extras: ext.flat(),
   };
 }
+
+export type CountedMovement = {
+  id: string; reference_no: string | null; kind: string; sb_number: number | null; title: string | null;
+  effective_date: string; status: string; status_note: string | null; total: number;
+};
+
+/**
+ * Movements a live (draft) report counts at `cutoff`, with each movement's net total in centavos.
+ * Mirrors pr_tracker._saao_counted_movements, which freezes the same list at finalization.
+ */
+export async function listCountedMovements(bookId: string, cutoff: string, movementRule: string): Promise<CountedMovement[]> {
+  const supabase = await createClient();
+  const rows = await fetchAll((from, to) => {
+    let q = supabase.from("saao_movements")
+      .select("id, reference_no, kind, sb_number, title, effective_date, status, status_note, lines:saao_movement_lines(amount)")
+      .eq("book_id", bookId).lte("effective_date", cutoff);
+    // PROVISIONAL (R11): 'approved_only' counts approved movements only
+    if (movementRule !== "all_entered") q = q.eq("status", "approved");
+    // PROVISIONAL (R12): a movement counts when effective_date <= cutoff
+    return q.order("effective_date").order("reference_no").order("id").range(from, to);
+  });
+  return rows.map(({ lines, ...m }) => ({ ...m, total: (lines ?? []).reduce((a, l) => a + fromNumeric(l.amount as Num), 0) }));
+}
