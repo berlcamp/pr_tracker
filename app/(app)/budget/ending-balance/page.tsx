@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { endingBalanceMatrix } from "@/lib/saao/ending-balance";
 import { formatAmount } from "@/lib/saao/money";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ViewFilters } from "../dashboard/filters";
 import { loadView, type ViewParams } from "../dashboard/load";
@@ -54,6 +55,10 @@ export default async function EndingBalancePage({ searchParams }: Props) {
           FY {v.book.fiscalYear} · {v.book.fundName || v.book.title} · As of {v.cutoffLabel} · Balance of Allotment by section and classification
         </p>
         {banner}
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" size="sm"><a href={`/budget/export/${report.id}?sheet=ending-balance`}>Export Excel</a></Button>
+          <Button asChild variant="outline" size="sm"><Link href={`/print/saao/${report.id}?sheet=ending-balance`} target="_blank">Print</Link></Button>
+        </div>
         <ViewFilters params={params} cutoffs={v.cutoffs} reportId={report.id} canPreview={v.canPreview} preview={v.preview} />
       </header>
       <div className="max-h-[75vh] overflow-auto rounded-md border">
