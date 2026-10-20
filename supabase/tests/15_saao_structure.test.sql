@@ -1,5 +1,5 @@
 begin;
-select plan(45);
+select plan(66);
 
 select tests.make_user('sviewer@saao.test', 'CSWD');
 select tests.make_user('sencoder@saao.test', 'GSO');
@@ -54,18 +54,18 @@ select tests.clear_authentication();
 
 -- ---------- encoder: structure ----------
 select tests.authenticate_as('sencoder@saao.test');
-select pr_tracker.saao_add_node((select id from pr_tracker.saao_books where fiscal_year = 2091), null, null, 'section', 'Sec A', null, null);
-select pr_tracker.saao_add_node((select id from pr_tracker.saao_books where fiscal_year = 2091), null, null, 'section', 'Sec B', null, null);
-select pr_tracker.saao_add_node((select id from pr_tracker.saao_books where fiscal_year = 2091),
+select lives_ok($q$select pr_tracker.saao_add_node((select id from pr_tracker.saao_books where fiscal_year = 2091), null, null, 'section', 'Sec A', null, null)$q$);
+select lives_ok($q$select pr_tracker.saao_add_node((select id from pr_tracker.saao_books where fiscal_year = 2091), null, null, 'section', 'Sec B', null, null)$q$);
+select lives_ok($q$select pr_tracker.saao_add_node((select id from pr_tracker.saao_books where fiscal_year = 2091),
   (select id from pr_tracker.saao_nodes where label = 'Sec A'), null, 'classification', 'PS',
-  null, (select id from pr_tracker.saao_classifications where code = 'PS'));
-select pr_tracker.saao_add_node((select id from pr_tracker.saao_books where fiscal_year = 2091),
-  (select id from pr_tracker.saao_nodes where label = 'PS'), null, 'line', 'L1', '5-01-01-010', null);
-select pr_tracker.saao_add_node((select id from pr_tracker.saao_books where fiscal_year = 2091),
-  (select id from pr_tracker.saao_nodes where label = 'PS'), null, 'line', 'L2', null, null);
-select pr_tracker.saao_add_node((select id from pr_tracker.saao_books where fiscal_year = 2091),
+  null, (select id from pr_tracker.saao_classifications where code = 'PS'))$q$);
+select lives_ok($q$select pr_tracker.saao_add_node((select id from pr_tracker.saao_books where fiscal_year = 2091),
+  (select id from pr_tracker.saao_nodes where label = 'PS'), null, 'line', 'L1', '5-01-01-010', null)$q$);
+select lives_ok($q$select pr_tracker.saao_add_node((select id from pr_tracker.saao_books where fiscal_year = 2091),
+  (select id from pr_tracker.saao_nodes where label = 'PS'), null, 'line', 'L2', null, null)$q$);
+select lives_ok($q$select pr_tracker.saao_add_node((select id from pr_tracker.saao_books where fiscal_year = 2091),
   (select id from pr_tracker.saao_nodes where label = 'PS'), (select id from pr_tracker.saao_nodes where label = 'L1'),
-  'line', 'L3', null, null);
+  'line', 'L3', null, null)$q$);
 
 select is((select string_agg(label || ':' || sort_order, ',' order by sort_order) from pr_tracker.saao_nodes where parent_id is null and book_id = (select id from pr_tracker.saao_books where fiscal_year = 2091)),
   'Sec A:10,Sec B:20', 'sections ordered 10/20');
@@ -85,6 +85,16 @@ select lives_ok($$select pr_tracker.saao_move_node((select id from pr_tracker.sa
 select is((select string_agg(label || ':' || sort_order, ',' order by sort_order) from pr_tracker.saao_nodes where parent_id = (select id from pr_tracker.saao_nodes where label = 'PS')),
   'L1:10,L3:20', 'old parent siblings renumbered after move');
 
+select lives_ok($q$select pr_tracker.saao_add_node((select id from pr_tracker.saao_books where fiscal_year = 2091), null, null, 'note', 'Tnote', null, null)$q$, 'note added');
+select throws_ok($$select pr_tracker.saao_move_node((select id from pr_tracker.saao_nodes where label = 'Sec B' and book_id = (select id from pr_tracker.saao_books where fiscal_year = 2091)), (select id from pr_tracker.saao_nodes where label = 'L1'), null)$$,
+  'P0001', 'A line or note cannot have children', 'non-descendant section under a line rejected');
+select throws_ok($$select pr_tracker.saao_move_node((select id from pr_tracker.saao_nodes where label = 'Sec B' and book_id = (select id from pr_tracker.saao_books where fiscal_year = 2091)), (select id from pr_tracker.saao_nodes where label = 'Tnote'), null)$$,
+  'P0001', 'A line or note cannot have children', 'node under a note rejected');
+select lives_ok($$select pr_tracker.saao_delete_node((select id from pr_tracker.saao_nodes where label = 'Tnote'))$$, 'test note removed');
+select lives_ok($q$select pr_tracker.saao_add_node((select id from pr_tracker.saao_books where fiscal_year = 2091), (select id from pr_tracker.saao_nodes where label = 'Sec B'), null, 'line', 'Lz', null, null)$q$, 'figure-free line added');
+select throws_ok($$select pr_tracker.saao_update_node((select id from pr_tracker.saao_nodes where label = 'Lz'), '{"appropriation": 5000, "active": false}')$$,
+  'P0001', 'This line has figures; remove them before deactivating', 'appropriation plus active=false in one patch rejected');
+select lives_ok($$select pr_tracker.saao_delete_node((select id from pr_tracker.saao_nodes where label = 'Lz'))$$, 'temp line removed');
 select throws_ok($$select pr_tracker.saao_update_node((select id from pr_tracker.saao_nodes where label = 'L1'), '{"account_code": "5-2-3"}')$$,
   'P0001', 'Account code must look like 5-02-03-010', 'invalid account code');
 select throws_ok($$select pr_tracker.saao_update_node((select id from pr_tracker.saao_nodes where label = 'L1'), '{"kind": "note"}')$$,
@@ -106,8 +116,8 @@ select tests.clear_authentication();
 
 -- cross-book move
 select tests.authenticate_as('sadmin@saao.test');
-select pr_tracker.saao_create_book(2092, (select id from pr_tracker.saao_funds where code = 'GF'), 'FY2092 GF',
-  (select id from pr_tracker.saao_books where fiscal_year = 2091), false);
+select lives_ok($q$select pr_tracker.saao_create_book(2092, (select id from pr_tracker.saao_funds where code = 'GF'), 'FY2092 GF',
+  (select id from pr_tracker.saao_books where fiscal_year = 2091), false)$q$);
 select tests.clear_authentication();
 
 select is((select count(*)::int from pr_tracker.saao_nodes where book_id = (select id from pr_tracker.saao_books where fiscal_year = 2092)),
@@ -146,39 +156,39 @@ grant all on audit_n to authenticated;
 insert into audit_n select count(*)::int from pr_tracker.saao_audit;
 
 select tests.authenticate_as('sadmin@saao.test');
-select pr_tracker.saao_update_book((select id from pr_tracker.saao_books where fiscal_year = 2091), '{"title": "Again"}');
+select lives_ok($q$select pr_tracker.saao_update_book((select id from pr_tracker.saao_books where fiscal_year = 2091), '{"title": "Again"}')$q$);
 select tests.clear_authentication();
 select is((select count(*)::int from pr_tracker.saao_audit) - (select c from audit_n), 1, 'update_book writes one audit row');
 
 select tests.authenticate_as('sencoder@saao.test');
-select pr_tracker.saao_add_node((select id from pr_tracker.saao_books where fiscal_year = 2091), null, null, 'note', 'A note', null, null);
+select lives_ok($q$select pr_tracker.saao_add_node((select id from pr_tracker.saao_books where fiscal_year = 2091), null, null, 'note', 'A note', null, null)$q$);
 select tests.clear_authentication();
 select is((select count(*)::int from pr_tracker.saao_audit) - (select c from audit_n), 2, 'add_node writes one audit row');
 
 select tests.authenticate_as('sencoder@saao.test');
-select pr_tracker.saao_update_node((select id from pr_tracker.saao_nodes where label = 'L3' and book_id = (select id from pr_tracker.saao_books where fiscal_year = 2091)), '{"label": "L3b"}');
+select lives_ok($q$select pr_tracker.saao_update_node((select id from pr_tracker.saao_nodes where label = 'L3' and book_id = (select id from pr_tracker.saao_books where fiscal_year = 2091)), '{"label": "L3b"}')$q$);
 select tests.clear_authentication();
 select is((select count(*)::int from pr_tracker.saao_audit) - (select c from audit_n), 3, 'update_node writes one audit row');
 
 select tests.authenticate_as('sencoder@saao.test');
-select pr_tracker.saao_move_node((select id from pr_tracker.saao_nodes where label = 'A note'), null, (select id from pr_tracker.saao_nodes where label = 'Sec A' and book_id = (select id from pr_tracker.saao_books where fiscal_year = 2091)));
+select lives_ok($q$select pr_tracker.saao_move_node((select id from pr_tracker.saao_nodes where label = 'A note'), null, (select id from pr_tracker.saao_nodes where label = 'Sec A' and book_id = (select id from pr_tracker.saao_books where fiscal_year = 2091)))$q$);
 select tests.clear_authentication();
 select is((select count(*)::int from pr_tracker.saao_audit) - (select c from audit_n), 4, 'move_node writes one audit row');
 select is((select string_agg(label, ',' order by sort_order) from pr_tracker.saao_nodes where parent_id is null and book_id = (select id from pr_tracker.saao_books where fiscal_year = 2091)),
   'Sec A,A note,Sec B', 'move after a sibling places it there');
 
 select tests.authenticate_as('sencoder@saao.test');
-select pr_tracker.saao_delete_node((select id from pr_tracker.saao_nodes where label = 'A note'));
+select lives_ok($q$select pr_tracker.saao_delete_node((select id from pr_tracker.saao_nodes where label = 'A note'))$q$);
 select tests.clear_authentication();
 select is((select count(*)::int from pr_tracker.saao_audit) - (select c from audit_n), 5, 'delete_node writes one audit row');
 
 select tests.authenticate_as('sadmin@saao.test');
-select pr_tracker.saao_set_access((select id from pr_tracker.profiles where email = 'snogrant@saao.test'), null);
+select lives_ok($q$select pr_tracker.saao_set_access((select id from pr_tracker.profiles where email = 'snogrant@saao.test'), null)$q$);
 select tests.clear_authentication();
 select is((select count(*)::int from pr_tracker.saao_audit) - (select c from audit_n), 6, 'set_access writes one audit row');
 
 select tests.authenticate_as('sadmin@saao.test');
-select pr_tracker.saao_create_book(2093, (select id from pr_tracker.saao_funds where code = 'GF'), 'FY2093', null, false);
+select lives_ok($q$select pr_tracker.saao_create_book(2093, (select id from pr_tracker.saao_funds where code = 'GF'), 'FY2093', null, false)$q$);
 select tests.clear_authentication();
 select is((select count(*)::int from pr_tracker.saao_audit) - (select c from audit_n), 7, 'create_book writes one audit row');
 

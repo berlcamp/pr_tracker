@@ -242,7 +242,7 @@ returns void language plpgsql security definer set search_path = '' as $$
 declare v_actor pr_tracker.profiles := pr_tracker._saao_require('encoder');
         v_old pr_tracker.saao_nodes; v_new pr_tracker.saao_nodes; k text;
 begin
-  select * into v_old from pr_tracker.saao_nodes where id = p_id;
+  select * into v_old from pr_tracker.saao_nodes where id = p_id for update;
   if v_old.id is null then raise exception 'Row not found'; end if;
   if p_patch is null or jsonb_typeof(p_patch) <> 'object' then raise exception 'Nothing to update'; end if;
   -- kind and book_id are deliberately not patchable: they would break the tree
@@ -268,7 +268,8 @@ begin
   if p_patch ? 'appropriation' then v_new.appropriation := coalesce((p_patch ->> 'appropriation')::numeric, 0); end if;
   if p_patch ? 'appropriation_ref' then v_new.appropriation_ref := pr_tracker._clean(p_patch ->> 'appropriation_ref'); end if;
   if p_patch ? 'active' then v_new.active := coalesce((p_patch ->> 'active')::boolean, true); end if;
-  if v_old.kind = 'line' and v_old.active and not v_new.active and pr_tracker._saao_line_has_figures(p_id) then
+  if v_old.kind = 'line' and v_old.active and not v_new.active
+     and (v_new.appropriation <> 0 or pr_tracker._saao_line_has_figures(p_id)) then
     raise exception 'This line has figures; remove them before deactivating';
   end if;
 
@@ -320,7 +321,7 @@ create or replace function pr_tracker.saao_delete_node(p_id uuid)
 returns void language plpgsql security definer set search_path = '' as $$
 declare v_actor pr_tracker.profiles := pr_tracker._saao_require('encoder'); v_old pr_tracker.saao_nodes;
 begin
-  select * into v_old from pr_tracker.saao_nodes where id = p_id;
+  select * into v_old from pr_tracker.saao_nodes where id = p_id for update;
   if v_old.id is null then raise exception 'Row not found'; end if;
   if v_old.kind = 'line' and pr_tracker._saao_line_has_figures(p_id) then
     raise exception 'This line has figures and cannot be deleted';
