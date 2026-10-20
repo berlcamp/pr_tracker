@@ -11,7 +11,8 @@
     "test:db": "supabase test db",
     "db:reset": "supabase db reset",
     "db:types": "supabase gen types typescript --local --schema pr_tracker > lib/supabase/database.types.ts",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "saao:fixture-sql": "node --experimental-strip-types scripts/saao/fixture-to-sql.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
