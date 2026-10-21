@@ -1,14 +1,14 @@
 "use client";
 import { useState } from "react";
-import type { ColumnDef } from "@tanstack/react-table";
-import { Download, ExternalLink, Paperclip } from "lucide-react";
+import { Download, ExternalLink, FileText, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
-import { DataTable } from "@/components/data-table/data-table";
 import { TextActionDialog } from "./remarks-panel";
+import { PrSection } from "./pr-section";
+import { cn } from "@/lib/utils";
 import { validateFile } from "@/lib/pr/files";
 import { uploadAttachment } from "@/lib/pr/upload-client";
 import { formatDateTime } from "@/lib/format";
@@ -43,56 +43,70 @@ export function AttachmentsPanel({ prId, attachments, canUpload, myOfficeId, max
     return downloadSignedUrl(() => getAttachmentUrl(id, true));
   }
 
-  const columns: ColumnDef<AttachmentItem>[] = [
-    { accessorKey: "filename", header: "File", cell: ({ row }) => (
-      <span className="flex items-center gap-2">
-        <span className={row.original.superseded_at ? "text-muted-foreground line-through" : ""}>{row.original.filename}</span>
-        {row.original.is_pr_document && <Badge>PR document</Badge>}
-      </span>) },
-    { id: "office", header: "Office", accessorFn: (r) => r.office?.name ?? "" },
-    { id: "uploader", header: "Uploaded by", accessorFn: (r) => r.uploader?.full_name ?? "" },
-    { accessorKey: "size_bytes", header: "Size", cell: ({ row }) => `${(row.original.size_bytes / 1024 / 1024).toFixed(2)} MB` },
-    { accessorKey: "created_at", header: "Uploaded", cell: ({ row }) => formatDateTime(row.original.created_at) },
-    { id: "status", header: "Status", cell: ({ row }) => row.original.superseded_at
-      ? <Badge variant="outline" title={row.original.superseded_reason ?? ""}>Superseded</Badge> : <Badge variant="secondary">Current</Badge> },
-    { id: "actions", header: "", enableHiding: false, cell: ({ row }) => (
-      <div className="flex justify-end gap-1">
-        {INLINE_TYPES.has(row.original.mime_type) && (
-          <Button variant="ghost" size="sm" onClick={() => view(row.original.id)}><ExternalLink className="mr-1 size-4" />View</Button>
-        )}
-        <Button variant="ghost" size="sm" onClick={() => download(row.original.id)}><Download className="mr-1 size-4" />Download</Button>
-        {!row.original.superseded_at && !row.original.is_pr_document && row.original.office_id === myOfficeId && (
-          <TextActionDialog
-            trigger={<Button variant="ghost" size="sm">Mark superseded</Button>}
-            title={`Mark "${row.original.filename}" as superseded?`}
-            description="Files are never deleted. Superseded files stay visible but struck through."
-            label="Reason" required confirmLabel="Mark superseded" successMessage="Marked superseded"
-            onConfirm={(t) => supersedeAttachment(row.original.id, prId, t)}
-          />
-        )}
-      </div>) },
-  ];
+  const uploadDialog = canUpload && (
+    <ConfirmActionDialog<string>
+      trigger={<Button size="sm" variant="outline"><Paperclip className="mr-2 size-4" />Upload attachment</Button>}
+      title="Upload attachment?"
+      description={file ? <p>Attach <b>{file.name}</b> ({(file.size / 1024 / 1024).toFixed(2)} MB) to this PR. Followers will be notified.</p>
+                        : `PDF, JPG, PNG, DOCX or XLSX up to ${maxMb} MB.`}
+      confirmLabel="Upload" successMessage="File attached"
+      canConfirm={!!file && !problem}
+      onOpenChange={(o) => o && setFile(null)}
+      onConfirm={upload}
+    >
+      <Label htmlFor="attachment-file">File</Label>
+      <Input id="attachment-file" type="file" accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
+             onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+      {problem && <p className="text-sm text-destructive">{problem}</p>}
+    </ConfirmActionDialog>
+  );
 
   return (
-    <div className="space-y-4">
-      {canUpload && (
-        <ConfirmActionDialog<string>
-          trigger={<Button size="sm"><Paperclip className="mr-2 size-4" />Upload attachment</Button>}
-          title="Upload attachment?"
-          description={file ? <p>Attach <b>{file.name}</b> ({(file.size / 1024 / 1024).toFixed(2)} MB) to this PR. Followers will be notified.</p>
-                            : `PDF, JPG, PNG, DOCX or XLSX up to ${maxMb} MB.`}
-          confirmLabel="Upload" successMessage="File attached"
-          canConfirm={!!file && !problem}
-          onOpenChange={(o) => o && setFile(null)}
-          onConfirm={upload}
-        >
-          <Label htmlFor="attachment-file">File</Label>
-          <Input id="attachment-file" type="file" accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
-                 onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-          {problem && <p className="text-sm text-destructive">{problem}</p>}
-        </ConfirmActionDialog>
+    <PrSection title="Attachments" icon={Paperclip} count={attachments.length} action={uploadDialog}>
+      {attachments.length === 0 ? <p className="py-2 text-center text-sm text-muted-foreground">No attachments.</p> : (
+        <ul className="-my-2 divide-y">
+          {attachments.map((a) => {
+            const superseded = !!a.superseded_at;
+            return (
+              <li key={a.id} className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 py-3">
+                <div className="flex min-w-0 flex-1 basis-72 items-center gap-3">
+                  <span aria-hidden className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg",
+                    superseded ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary")}>
+                    <FileText className="size-4" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                      <span className={cn("break-all", superseded && "text-muted-foreground line-through")}>{a.filename}</span>
+                      {a.is_pr_document && <Badge>PR document</Badge>}
+                      {superseded && <Badge variant="outline" title={a.superseded_reason ?? ""}>Superseded</Badge>}
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {[a.office?.name, a.uploader?.full_name, formatDateTime(a.created_at), `${(a.size_bytes / 1024 / 1024).toFixed(2)} MB`]
+                        .filter(Boolean).join(" · ")}
+                    </p>
+                    {superseded && a.superseded_reason && <p className="mt-0.5 text-xs text-muted-foreground">Reason: {a.superseded_reason}</p>}
+                  </div>
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  {INLINE_TYPES.has(a.mime_type) && (
+                    <Button variant="ghost" size="sm" onClick={() => view(a.id)}><ExternalLink className="mr-1 size-4" />View</Button>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={() => download(a.id)}><Download className="mr-1 size-4" />Download</Button>
+                  {!superseded && !a.is_pr_document && a.office_id === myOfficeId && (
+                    <TextActionDialog
+                      trigger={<Button variant="ghost" size="sm">Mark superseded</Button>}
+                      title={`Mark "${a.filename}" as superseded?`}
+                      description="Files are never deleted. Superseded files stay visible but struck through."
+                      label="Reason" required confirmLabel="Mark superseded" successMessage="Marked superseded"
+                      onConfirm={(t) => supersedeAttachment(a.id, prId, t)}
+                    />
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
       )}
-      <DataTable columns={columns} data={attachments} searchPlaceholder="Filter files…" emptyMessage="No attachments." />
-    </div>
+    </PrSection>
   );
 }

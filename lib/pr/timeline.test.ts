@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { describeEvent, diffSnapshots, notificationText } from "./timeline";
+import { describeEvent, diffSnapshots, eventSummary, notificationText } from "./timeline";
 
 const base = {
   actor_name: "Gabriel", actor_office_name: "GSO", from_office_name: null, to_office_name: null, status_label: null,
@@ -34,5 +34,15 @@ describe("timeline", () => {
     expect(notificationText({ type: "forwarded", actor_office_name: "CSWD", routing_slip_no: "RS-2026-10-00001" }))
       .toBe("CSWD forwarded RS-2026-10-00001 to your office");
     expect(notificationText({ type: "completed", actor_office_name: "TREAS", routing_slip_no: "RS-1" })).toBe("RS-1 was completed");
+  });
+  test("event summary separates the reason from the title", () => {
+    expect(eventSummary({ ...base, event_type: "returned", to_office_name: "CSWD", remark: "Wrong amount" }, 10))
+      .toEqual({ title: "Returned to CSWD", kind: "return", note: { label: "Reason", text: "Wrong amount" } });
+    expect(eventSummary({ ...base, event_type: "forwarded", to_office_name: "Legal", override_reason: "Needs review", remark: "FYI" }, 10).note)
+      .toEqual({ label: "Reason", text: "Needs review" });
+    expect(eventSummary({ ...base, event_type: "forwarded", to_office_name: "GSO", route_purpose: "For review", to_route_step: 1, remark: "FYI" }, 10))
+      .toEqual({ title: "Forwarded to GSO for review (step 1 of 10)", kind: "move", note: { label: "Remark", text: "FYI" } });
+    expect(eventSummary({ ...base, event_type: "received" }, 10).title).toBe("Received by GSO");
+    expect(eventSummary({ ...base, event_type: "completed" }, 10).note).toBeNull();
   });
 });

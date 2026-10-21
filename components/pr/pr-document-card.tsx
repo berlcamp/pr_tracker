@@ -42,7 +42,7 @@ export function PrDocumentCard({ prId, doc, canUpload, maxMb }: { prId: string; 
 
   if (!doc) {
     return (
-      <Card className="border-amber-300 bg-amber-50"><CardContent className="flex flex-wrap items-center gap-3 p-4">
+      <Card className="gap-0 border-amber-300 bg-amber-50 py-0"><CardContent className="flex flex-wrap items-center gap-3 p-4">
         <AlertTriangle className="size-5 text-amber-600" />
         <p className="flex-1 text-sm">No PR document uploaded yet. This PR cannot be forwarded until the signed PR is uploaded.</p>
         {uploadDialog}
@@ -50,9 +50,9 @@ export function PrDocumentCard({ prId, doc, canUpload, maxMb }: { prId: string; 
     );
   }
   return (
-    <Card><CardContent className="flex flex-wrap items-center gap-3 p-4">
+    <Card className="gap-0 py-0"><CardContent className="flex flex-wrap items-center gap-3 p-4">
       <FileText className="size-5 text-primary" />
-      <div className="flex-1 text-sm">
+      <div className="min-w-0 flex-1 text-sm">
         <div className="font-medium">PR document: {doc.filename}</div>
         <div className="text-xs text-muted-foreground">Uploaded by {doc.uploader?.full_name} · {formatDateTime(doc.created_at)}</div>
       </div>

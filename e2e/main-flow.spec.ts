@@ -20,7 +20,7 @@ test("PR travels the full default route and is completed by the Treasurer", asyn
       await page.getByRole("button", { name: "Assign PR No." }).click();
       await page.getByRole("dialog").getByLabel("PR No.").fill("2026-10-0001");
       await confirm(page, "Save PR No.");
-      await expect(page.getByText("2026-10-0001")).toBeVisible();
+      await expect(page.getByTestId("pr-no")).toHaveText("2026-10-0001");
     }
     if (i < route.length - 1) {
       await forwardToSuggested(page);
@@ -39,9 +39,8 @@ test("PR travels the full default route and is completed by the Treasurer", asyn
   await expect(treas.getByTestId("location-line")).toHaveText("Completed at City Treasurer's Office");
 
   await cswd.goto(path);
-  await cswd.getByRole("tab", { name: "Timeline" }).click();
   await expect(cswd.getByText("Forwarded to Mayor's Office for signing of NOA / NTP (step 6 of 10)")).toBeVisible();
-  await expect(cswd.getByRole("tabpanel").getByText("Completed", { exact: true })).toBeVisible();
+  await expect(cswd.getByRole("region", { name: "Timeline" }).getByText("Completed", { exact: true })).toBeVisible();
 });
 
 test("notification bell shows incoming PR for destination office", async ({ browser }) => {

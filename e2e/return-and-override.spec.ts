@@ -33,7 +33,6 @@ test("off-route forward needs a reason; return, edit with diff, re-forward", asy
   await cswd.getByRole("button", { name: "Save changes" }).click();
   await confirm(cswd, "Save changes");
   await cswd.waitForURL(new RegExp(`${path}$`));
-  await cswd.getByRole("tab", { name: "Timeline" }).click();
   await expect(cswd.getByText("after return")).toBeVisible();
   await expect(cswd.getByText('Purpose: "E2E return flow" → "E2E return flow (revised)"')).toBeVisible();
   await forwardToSuggested(cswd);

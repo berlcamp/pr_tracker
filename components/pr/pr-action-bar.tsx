@@ -41,7 +41,7 @@ export function PrActionBar(p: Props) {
   const finalStatuses = p.statuses.filter((s) => s.allows_completion);
   const completeBlocked = finalStatuses.length > 0 && !finalStatuses.some((s) => s.id === p.pr.current_status_id);
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+    <div className="flex flex-wrap items-center gap-2 border-t pt-4 empty:hidden">
       {has("upload_pr_document") && !p.pr.has_pr_document && (
         <p className="w-full text-sm text-amber-700">Upload the PR document before forwarding.</p>
       )}

@@ -17,6 +17,11 @@ export function formatDaysHere(days: number): string {
   return d === 1 ? "1 day" : `${d} days`;
 }
 
+export function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase() || "?";
+}
+
 export function formatPeso(n: number): string {
   return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(n);
 }

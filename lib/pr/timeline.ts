@@ -50,6 +50,37 @@ export function describeEvent(e: TimelineEvent, totalSteps: number): string {
   }
 }
 
+export type EventKind = "create" | "move" | "receive" | "return" | "status" | "comment" | "file" | "complete" | "cancel" | "follow" | "meta";
+export type EventSummary = { title: string; kind: EventKind; note: { label: string; text: string } | null };
+
+/** Timeline card content: an action-first title (the actor is shown separately) and an optional quoted reason or remark. */
+export function eventSummary(e: TimelineEvent, totalSteps: number): EventSummary {
+  const note = (label: string, text: string | null | undefined) => (text ? { label, text } : null);
+  switch (e.event_type) {
+    case "created": return { title: "Created", kind: "create", note: null };
+    case "edited": return { title: e.payload.before ? "Edited after return" : "Edited", kind: "meta", note: null };
+    case "forwarded": return {
+      title: e.route_purpose && e.to_route_step
+        ? `Forwarded to ${e.to_office_name} ${lcFirst(e.route_purpose)} (step ${e.to_route_step} of ${totalSteps})`
+        : `Forwarded to ${e.to_office_name} outside the default route`,
+      kind: "move",
+      note: note("Reason", e.override_reason) ?? note("Remark", e.remark),
+    };
+    case "received": return { title: `Received by ${e.actor_office_name ?? e.actor_name}`, kind: "receive", note: null };
+    case "returned": return { title: `Returned to ${e.to_office_name}`, kind: "return", note: note("Reason", e.remark) };
+    case "recalled": return { title: `Recalled from ${e.from_office_name}`, kind: "return", note: null };
+    case "status_changed": return { title: `Status set to "${str(e.status_label)}"`, kind: "status", note: note("Remark", e.remark) };
+    case "remark_added": return { title: "Added a remark", kind: "comment", note: note("Remark", e.remark) };
+    case "attachment_superseded": return { title: `Marked ${str(e.payload.filename)} as superseded`, kind: "file", note: note("Reason", e.remark) };
+    case "cancelled": return { title: "Cancelled", kind: "cancel", note: note("Reason", e.remark) };
+    case "completed": return { title: "Completed", kind: "complete", note: null };
+    case "private_note_added": return { title: "Private note added", kind: "comment", note: null };
+    case "attachment_added": case "pr_document_uploaded": return { title: describeEvent(e, totalSteps), kind: "file", note: null };
+    case "pr_no_assigned": case "mode_set": return { title: describeEvent(e, totalSteps), kind: "status", note: null };
+    case "followed": case "unfollowed": return { title: describeEvent(e, totalSteps), kind: "follow", note: null };
+  }
+}
+
 export type Snapshot = { header: Record<string, unknown> };
 
 const HEADER_LABELS: Record<string, string> = {

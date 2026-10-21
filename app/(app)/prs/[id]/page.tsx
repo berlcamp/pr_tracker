@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent } from "@/components/ui/card";
+import { ClipboardList } from "lucide-react";
+import { Card } from "@/components/ui/card";
 import { requireProfile } from "@/lib/auth/profile";
 import { createClient } from "@/lib/supabase/server";
 import { availableActions } from "@/lib/pr/permissions";
@@ -12,7 +12,8 @@ import { RemarksPanel } from "@/components/pr/remarks-panel";
 import { AttachmentsPanel } from "@/components/pr/attachments-panel";
 import { PrivateNotesPanel } from "@/components/pr/private-notes-panel";
 import { PrActionBar, type Suggestion } from "@/components/pr/pr-action-bar";
-import { formatPeso } from "@/lib/format";
+import { PrSection } from "@/components/pr/pr-section";
+import { formatDate, formatPeso } from "@/lib/format";
 
 export default async function PrDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -60,54 +61,59 @@ export default async function PrDetailPage({ params }: { params: Promise<{ id: s
     .map((i) => ({ id: i.office_id, name: (i.office as { name: string } | null)?.name ?? "" }));
   const terminal = pr.movement_state === "completed" || pr.movement_state === "cancelled";
 
+  const detail = (label: string, value: React.ReactNode, wide = false) => (
+    <div className={wide ? "col-span-2" : "min-w-0"}>
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 text-sm font-medium">{value ?? "—"}</dd>
+    </div>
+  );
+
+  // Two columns on desktop: the PR on the left, a sticky timeline on the right. On mobile the timeline follows the details.
   return (
-    <div className="space-y-6">
-      <PrHeader pr={pr} actions={
-        <PrActionBar
-          pr={{ id, routing_slip_no: pr.routing_slip_no!, pr_no: pr.pr_no, mode_of_procurement: pr.mode_of_procurement,
-                current_office_name: pr.current_office_name!, sent_by_office_name: pr.sent_by_office_name, total_steps: pr.total_steps ?? 0,
-                has_pr_document: !!pr.has_pr_document, current_status_id: pr.current_status_id,
-                current_status_label: pr.current_status_label }}
-          actions={actionList} suggestion={suggestion}
-          offices={officesRes.data ?? []} returnTargets={returnTargets} statuses={statusesRes.data ?? []}
-          myOfficeId={officeId ?? null} myOfficeName={profile.office?.name ?? null}
-          isFollowing={(followRes.data ?? []).length > 0}
-          canFollow={!!officeId && !terminal}
-        />
-      } />
-      <PrDocumentCard prId={id} doc={(prDoc.data ?? null) as PrDocument | null} canUpload={actions.has("upload_pr_document")} maxMb={maxMb} />
-      <Tabs defaultValue="details">
-        <TabsList className="flex-wrap">
-          <TabsTrigger value="details">Details</TabsTrigger>
-          <TabsTrigger value="timeline">Timeline</TabsTrigger>
-          <TabsTrigger value="remarks">Remarks ({remarks.data?.length ?? 0})</TabsTrigger>
-          <TabsTrigger value="attachments">Attachments ({attachments.data?.length ?? 0})</TabsTrigger>
-          {officeId && <TabsTrigger value="notes">Private notes</TabsTrigger>}
-        </TabsList>
-        <TabsContent value="details" className="space-y-4">
-          <Card><CardContent className="grid gap-3 p-5 text-sm sm:grid-cols-2">
-            <div><span className="text-muted-foreground">Purpose: </span>{pr.purpose}</div>
-            <div><span className="text-muted-foreground">Responsibility Center Code: </span>{pr.responsibility_center_code ?? "—"}</div>
-            <div><span className="text-muted-foreground">Fund Cluster: </span>{pr.fund_cluster ?? "—"}</div>
-            <div><span className="text-muted-foreground">Requested by: </span>{pr.requested_by_name}{pr.requested_by_designation ? `, ${pr.requested_by_designation}` : ""}</div>
-            <div><span className="text-muted-foreground">Amount: </span>{formatPeso(Number(pr.amount))}</div>
-          </CardContent></Card>
-        </TabsContent>
-        <TabsContent value="timeline"><PrTimeline events={timeline.data ?? []} totalSteps={pr.total_steps ?? 0} /></TabsContent>
-        <TabsContent value="remarks">
-          <RemarksPanel prId={id} remarks={(remarks.data ?? []) as never} canAdd={actions.has("add_remark")} />
-        </TabsContent>
-        <TabsContent value="attachments">
-          <AttachmentsPanel prId={id} attachments={(attachments.data ?? []) as never}
-            canUpload={actions.has("add_attachment")} myOfficeId={officeId ?? null}
-            maxMb={maxMb} />
-        </TabsContent>
-        {officeId && (
-          <TabsContent value="notes">
-            <PrivateNotesPanel prId={id} notes={(notes.data ?? []) as never} canAdd={actions.has("add_private_note")} />
-          </TabsContent>
-        )}
-      </Tabs>
+    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(340px,400px)] lg:grid-rows-[repeat(6,auto)_1fr]">
+      <div className="space-y-4 lg:col-start-1">
+        <PrHeader pr={pr} actions={
+          <PrActionBar
+            pr={{ id, routing_slip_no: pr.routing_slip_no!, pr_no: pr.pr_no, mode_of_procurement: pr.mode_of_procurement,
+                  current_office_name: pr.current_office_name!, sent_by_office_name: pr.sent_by_office_name, total_steps: pr.total_steps ?? 0,
+                  has_pr_document: !!pr.has_pr_document, current_status_id: pr.current_status_id,
+                  current_status_label: pr.current_status_label }}
+            actions={actionList} suggestion={suggestion}
+            offices={officesRes.data ?? []} returnTargets={returnTargets} statuses={statusesRes.data ?? []}
+            myOfficeId={officeId ?? null} myOfficeName={profile.office?.name ?? null}
+            isFollowing={(followRes.data ?? []).length > 0}
+            canFollow={!!officeId && !terminal}
+          />
+        } />
+        <PrDocumentCard prId={id} doc={(prDoc.data ?? null) as PrDocument | null} canUpload={actions.has("upload_pr_document")} maxMb={maxMb} />
+      </div>
+      <PrSection title="Details" icon={ClipboardList} className="lg:col-start-1">
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-4">
+          {detail("Purpose", <span className="font-normal whitespace-pre-wrap">{pr.purpose}</span>, true)}
+          {detail("Requested by", <>{pr.requested_by_name}{pr.requested_by_designation && <span className="font-normal text-muted-foreground">, {pr.requested_by_designation}</span>}</>)}
+          {detail("Origin office", pr.origin_office_name)}
+          {detail("PR date", formatDate(pr.pr_date!))}
+          {detail("Amount", <span className="tabular-nums">{formatPeso(Number(pr.amount))}</span>)}
+          {detail("Mode of procurement", pr.mode_of_procurement)}
+          {detail("Responsibility Center Code", pr.responsibility_center_code)}
+          {detail("Fund Cluster", pr.fund_cluster)}
+        </dl>
+      </PrSection>
+      <Card className="gap-0 overflow-hidden py-0 max-lg:max-h-[70svh] lg:sticky lg:top-20 lg:col-start-2 lg:row-[1/-1] lg:max-h-[calc(100svh-6.5rem)]">
+        <PrTimeline events={timeline.data ?? []} totalSteps={pr.total_steps ?? 0} />
+      </Card>
+      <div className="lg:col-start-1">
+        <RemarksPanel prId={id} remarks={(remarks.data ?? []) as never} canAdd={actions.has("add_remark")} />
+      </div>
+      <div className="lg:col-start-1">
+        <AttachmentsPanel prId={id} attachments={(attachments.data ?? []) as never}
+          canUpload={actions.has("add_attachment")} myOfficeId={officeId ?? null} maxMb={maxMb} />
+      </div>
+      {officeId && (
+        <div className="lg:col-start-1">
+          <PrivateNotesPanel prId={id} notes={(notes.data ?? []) as never} canAdd={actions.has("add_private_note")} />
+        </div>
+      )}
     </div>
   );
 }

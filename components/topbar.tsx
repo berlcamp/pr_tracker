@@ -8,12 +8,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { GlobalSearch } from "./global-search";
 import { SignOutMenuItem } from "./sign-out-menu-item";
+import { initials } from "@/lib/format";
 import type { Profile } from "@/lib/types";
-
-function initials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase() || "?";
-}
 
 export function Topbar({ profile, avatarUrl, bell }: { profile: Profile; avatarUrl?: string | null; bell?: React.ReactNode }) {
   const subtitle = profile.office?.name ?? profile.role.replace("_", " ");
