@@ -121,3 +121,13 @@ grant execute on all functions in schema tests to authenticated, anon;
 
 -- auth user with NO profile, for the unauthorized-login E2E test
 select tests.create_password_user('nobody@test.local', 'password123');
+
+-- SAAO: grant a budget role to an existing test profile (run as postgres, before authenticating)
+create or replace function tests.grant_saao(p_email text, p_role text)
+returns void language plpgsql as $$
+begin
+  insert into pr_tracker.saao_access (profile_id, role)
+  values ((select id from pr_tracker.profiles where email = lower(p_email)), p_role)
+  on conflict (profile_id) do update set role = excluded.role;
+end $$;
+grant execute on function tests.grant_saao(text, text) to authenticated, anon;

@@ -102,7 +102,7 @@ Every rule falls into one of three classes. The class lives in code as a constan
 | R11 | Movement counting: which movement statuses count in totals | **P** | Book setting `movement_rule = 'all_entered'` (workbook behaviour: every entered amount counts, whatever its note). Alternative: `'approved_only'`. Finalization shows the non-approved movements that would be counted, and the finalizer must acknowledge them (§7.3). |
 | R12 | Movement dating: a movement counts in a report if `effective_date ≤ cutoff_date` | **P** | The workbook has no dates. Needed for correct historical revisions. |
 | R13 | CNA (1), CNA (2), CNA (3), Savings: per line, each is blank, "= Balance of Allotment", or a typed amount | **A** | Reproduces the workbook's mix of `=Z` and typed values. Column labels are configurable per book. |
-| R14 | 50% of Savings = Savings × 0.5 | C (formula) / **A** (meaning) | |
+| R14 | 50% of Savings = Savings × 0.5 | C (formula) / **A** (meaning) | Lines: Savings × 0.5 (rounded half away from zero). Subtotals and totals: half of the summed savings, rounded once — reproduces the workbook total 3,418,090.18. |
 | R15 | Summary of Ending Balance grouping and which balance it shows | **A** | Framework report: balance of allotment by top-level section × classification. Labelled unconfirmed (§9.5). |
 
 ## 4. Data model
