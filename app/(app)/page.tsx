@@ -26,7 +26,11 @@ export default async function DashboardPage() {
     return (
       <div className="space-y-6">
         <h1 className="text-2xl font-semibold">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">Your account is not assigned to an office. Showing PRs that are stuck across all offices.</p>
+        <p className="text-sm text-muted-foreground">
+          {profile.role === "staff"
+            ? "Your account is not assigned to an office. Ask an administrator to assign one."
+            : "Your account is not assigned to an office. Showing PRs that are stuck across all offices."}
+        </p>
         <Card><CardHeader><CardTitle>Stuck PRs</CardTitle></CardHeader><CardContent><StuckTable rows={(data ?? []) as StuckRow[]} /></CardContent></Card>
       </div>
     );

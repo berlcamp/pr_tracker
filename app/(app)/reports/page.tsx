@@ -20,9 +20,16 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     supabase.rpc("report_stuck_prs"),
   ]);
 
+  const isAdmin = profile.role !== "staff";
+
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Reports</h1>
+      <div className="space-y-1">
+        <h1 className="text-2xl font-semibold">Reports</h1>
+        <p className="text-sm text-muted-foreground">
+          {isAdmin ? "Showing all offices." : `Showing ${profile.office?.name ?? "your office"} only.`}
+        </p>
+      </div>
       <Card>
         <CardHeader>
           <CardTitle>Average days per office</CardTitle>
@@ -30,11 +37,11 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         </CardHeader>
         <CardContent className="space-y-4">
           <DateRange from={from} to={to} />
-          <OfficeDaysTable rows={(days.data ?? []) as OfficeDaysRow[]} canExport={profile.role !== "staff"} from={from} to={to} />
+          <OfficeDaysTable rows={(days.data ?? []) as OfficeDaysRow[]} canExport={isAdmin} from={from} to={to} />
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle>Stuck PRs</CardTitle><CardDescription>Held or in transit longer than the threshold in Settings.</CardDescription></CardHeader>
+        <CardHeader><CardTitle>Stuck PRs</CardTitle><CardDescription>Held or in transit longer than the threshold in Settings.{!isAdmin && " Includes PRs at your office and PRs your office originated."}</CardDescription></CardHeader>
         <CardContent><StuckTable rows={(stuck.data ?? []) as StuckRow[]} /></CardContent>
       </Card>
     </div>
