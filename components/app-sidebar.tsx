@@ -3,7 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  BarChart3, Building2, FilePlus2, FileText, LayoutDashboard, ListChecks, QrCode, Route, Settings, Users,
+  BarChart3, Building2, FileText, LayoutDashboard, ListChecks, Route, Settings, Users,
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
@@ -15,8 +15,6 @@ import type { Profile } from "@/lib/types";
 const MAIN = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/prs", label: "Purchase Requests", icon: FileText },
-  { href: "/prs/new", label: "New PR", icon: FilePlus2, needsOffice: true },
-  { href: "/track", label: "Track", icon: QrCode },
   { href: "/reports", label: "Reports", icon: BarChart3 },
 ];
 const ADMIN = [
@@ -35,7 +33,6 @@ const ITEM = "h-10 gap-3 px-3 text-sm text-sidebar-foreground/85 transition-colo
 export function AppSidebar({ profile }: { profile: Profile }) {
   const pathname = usePathname();
   const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`));
-  const main = MAIN.filter((i) => !i.needsOffice || profile.office);
 
   return (
     <Sidebar>
@@ -52,9 +49,9 @@ export function AppSidebar({ profile }: { profile: Profile }) {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu className={MENU}>
-              {main.map((i) => (
+              {MAIN.map((i) => (
                 <SidebarMenuItem key={i.href}>
-                  <SidebarMenuButton asChild className={ITEM} isActive={isActive(i.href) && !(i.href === "/prs" && pathname === "/prs/new")}>
+                  <SidebarMenuButton asChild className={ITEM} isActive={isActive(i.href)}>
                     <Link href={i.href}><i.icon /><span>{i.label}</span></Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

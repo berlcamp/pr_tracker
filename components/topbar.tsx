@@ -1,11 +1,11 @@
-import { ChevronDown } from "lucide-react";
+import Link from "next/link";
+import { ChevronDown, Plus } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { LogoStrip } from "./brand-logos";
 import { GlobalSearch } from "./global-search";
 import { SignOutMenuItem } from "./sign-out-menu-item";
 import type { Profile } from "@/lib/types";
@@ -21,9 +21,14 @@ export function Topbar({ profile, avatarUrl, bell }: { profile: Profile; avatarU
     <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur">
       <SidebarTrigger />
       <GlobalSearch />
-      <div className="ml-auto flex items-center gap-3">
-        <LogoStrip size={36} className="hidden gap-3 xl:flex" />
-        <div aria-hidden className="hidden h-8 w-px bg-border xl:block" />
+      <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+        {profile.office && (
+          <Button asChild className="h-10 cursor-pointer gap-1.5 px-3 sm:px-4">
+            <Link href="/prs/new" aria-label="New purchase request">
+              <Plus className="size-4" aria-hidden /><span className="hidden sm:inline">New PR</span>
+            </Link>
+          </Button>
+        )}
         {bell}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
