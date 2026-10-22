@@ -20,7 +20,10 @@ export async function proxy(request: NextRequest) {
     },
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
+  // getClaims verifies the JWT locally against the project's JWKS (no Auth round trip) when
+  // asymmetric signing keys are enabled, and falls back to getUser() for legacy HS256 keys.
+  const { data } = await supabase.auth.getClaims();
+  const user = data?.claims.sub;
   const path = request.nextUrl.pathname;
   const isPublic = PUBLIC_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
 
