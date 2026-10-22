@@ -31,9 +31,9 @@ describe("availableActions", () => {
       staff(office("treas", { can_assign_pr_no: true, can_set_mode_of_procurement: true, can_complete: true })));
     for (const x of ["forward", "return", "set_status", "assign_pr_no", "set_mode", "complete"]) expect(a.has(x as never)).toBe(true);
   });
-  test("admin without office can only cancel non-terminal PRs", () => {
-    expect([...availableActions(pr({ movement_state: "received", current_office_id: "gso" }), { role: "admin", office: null })]).toEqual(["cancel"]);
-    expect(availableActions(pr({ movement_state: "completed" }), { role: "admin", office: null }).size).toBe(0);
+  test("admins get no cancel override: none without an office, none on another office's PR", () => {
+    expect(availableActions(pr({ movement_state: "received", current_office_id: "gso" }), { role: "admin", office: null }).size).toBe(0);
+    expect(availableActions(pr({ movement_state: "in_transit", current_office_id: "gso" }), { role: "admin", office: office("acctg") }).has("cancel")).toBe(false);
   });
   test("origin edits after return once received back", () => {
     expect(availableActions(pr({ movement_state: "received" }), staff(office("cswd"))).has("edit")).toBe(true);

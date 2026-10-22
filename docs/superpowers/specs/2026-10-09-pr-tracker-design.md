@@ -53,7 +53,7 @@ Let any LGU office instantly see **where a Purchase Request (PR) physically is**
 | Role | Capabilities |
 |---|---|
 | `super_admin` | Everything admins can do, plus promote/demote admins. Exactly one: berlcamp@gmail.com, defined by env var `SUPER_ADMIN_EMAIL`. |
-| `admin` | Create/edit/deactivate user accounts, manage offices, default route, office statuses, office permissions, settings; view all PRs; cancel any PR; export reports. |
+| `admin` | Create/edit/deactivate user accounts, manage offices, default route, office statuses, office permissions, settings; view all PRs; export reports. (Admins cannot cancel PRs; see `cancel_pr`.) |
 | `staff` | Act on behalf of their office. **All staff within an office are equal.** |
 
 ### Authentication / allowlist
@@ -207,7 +207,7 @@ All actions are **Postgres functions (RPC)** in `pr_tracker`, `SECURITY DEFINER`
 | `assign_pr_no(pr_id, pr_no)` | Office with `can_assign_pr_no` while holding | PR No. is unique when not null. |
 | `set_mode_of_procurement(pr_id, mode)` | Office with `can_set_mode_of_procurement` while holding | — |
 | `complete_pr(pr_id, remark?)` | Office with `can_complete` while holding | The PR becomes `completed`. |
-| `cancel_pr(pr_id, reason)` | Origin office (while `draft` or `received` at origin) or any admin | The PR becomes `cancelled`. |
+| `cancel_pr(pr_id, reason)` | Origin office only, while `draft` or `received` at origin (admins have no override) | The PR becomes `cancelled`. |
 | `follow_pr(pr_id)` / `unfollow_pr(pr_id)` | Any involved office | — |
 | `tracking_lookup(routing_slip_no)` | Any active user | Returns only: routing slip no., PR No., origin office, current office, movement state, processing status, current_since, and a timeline of movement events (office + timestamp, no remarks). |
 

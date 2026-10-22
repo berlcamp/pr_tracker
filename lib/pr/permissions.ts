@@ -20,8 +20,6 @@ export type ActorForActions = {
 /** UI mirror of the DB rules (DB remains the authority). */
 export function availableActions(pr: PrForActions, actor: ActorForActions): Set<PrAction> {
   const a = new Set<PrAction>();
-  const terminal = pr.movement_state === "completed" || pr.movement_state === "cancelled";
-  if (!terminal && actor.role !== "staff") a.add("cancel");
   const office = actor.office;
   if (!office) return a;
 

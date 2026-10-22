@@ -41,7 +41,7 @@ select tests.clear_authentication(); select tests.authenticate_as('pc@x.test');
 select lives_ok(format('select pr_tracker.add_remark(%L, %L)', current_setting('tests.pr'), 'Please prioritise'),
                 'origin can remark while not holding');
 select throws_like(format('select pr_tracker.cancel_pr(%L, %L)', current_setting('tests.pr'), 'No longer needed'),
-                   'Only the originating office (while it holds the PR) or an administrator can cancel it',
+                   'Only the originating office can cancel a PR, and only while it holds it',
                    'origin cannot cancel while PR is elsewhere');
 
 -- GSO follows, then Budget path for PR No.
