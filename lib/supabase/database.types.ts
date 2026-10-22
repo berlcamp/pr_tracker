@@ -784,10 +784,19 @@ export type Database = {
           actor_office_name: string | null
           created_at: string | null
           event_type: Database["pr_tracker"]["Enums"]["event_type"] | null
+          from_office_name: string | null
           id: number | null
+          override_reason: string | null
+          payload: Json | null
           pr_id: string | null
           purpose: string | null
+          remark: string | null
+          route_purpose: string | null
           routing_slip_no: string | null
+          status_label: string | null
+          to_office_name: string | null
+          to_route_step: number | null
+          total_steps: number | null
         }
         Relationships: [
           {
@@ -1141,6 +1150,21 @@ export type Database = {
       create_pr: { Args: { p_header: Json }; Returns: string }
       current_office_id: { Args: never; Returns: string }
       current_profile_id: { Args: never; Returns: string }
+      dashboard_open_pr_locations: {
+        Args: never
+        Returns: {
+          office_name: string
+          prs: number
+        }[]
+      }
+      dashboard_weekly_activity: {
+        Args: { p_weeks?: number }
+        Returns: {
+          received: number
+          sent: number
+          week_start: string
+        }[]
+      }
       follow_pr: { Args: { p_pr_id: string }; Returns: undefined }
       forward_pr: {
         Args: {

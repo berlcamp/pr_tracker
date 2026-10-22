@@ -11,7 +11,11 @@ export default function DashboardLoading() {
           <Card key={i}><CardContent className="space-y-2 p-5"><Skeleton className="h-4 w-24" /><Skeleton className="h-9 w-12" /></CardContent></Card>
         ))}
       </div>
-      <CardSkeleton rows={3} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="lg:col-span-2"><CardContent className="space-y-3"><Skeleton className="h-5 w-40" /><Skeleton className="h-64 w-full" /></CardContent></Card>
+        <Card><CardContent className="space-y-3"><Skeleton className="h-5 w-40" /><Skeleton className="h-56 w-full" /></CardContent></Card>
+        <Card><CardContent className="space-y-3"><Skeleton className="h-5 w-40" /><Skeleton className="h-56 w-full" /></CardContent></Card>
+      </div>
       <CardSkeleton rows={3} />
     </div>
   );

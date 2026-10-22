@@ -6,7 +6,7 @@ import { DataTableColumnHeader } from "@/components/data-table/column-header";
 import { MovementBadge } from "@/components/pr/movement-badge";
 import { ReceiveButton } from "@/components/pr/receive-button";
 import { RsLink } from "@/components/pr/rs-link";
-import { formatDateTime, formatDaysHere, formatPeso, locationLine } from "@/lib/format";
+import { formatDateTime, formatDaysHere, formatPeso } from "@/lib/format";
 import { describeEvent, type TimelineEvent } from "@/lib/pr/timeline";
 import type { MovementState } from "@/lib/types";
 import type { FollowedActivityRow, PrOverviewRow } from "@/lib/supabase/rows";
@@ -51,27 +51,11 @@ export function OnHandTable({ rows, threshold }: { rows: PrOverviewRow[]; thresh
     getRowClassName={(r) => (Number(r.days_here) >= threshold ? "bg-amber-50" : undefined)} />;
 }
 
-export function MyPrsTable({ rows }: { rows: PrOverviewRow[] }) {
-  const columns: ColumnDef<PrOverviewRow>[] = [
-    rs, purpose,
-    { id: "where", header: "Where is it now", cell: ({ row }) => {
-      const r = row.original;
-      return locationLine({ movement_state: r.movement_state as MovementState, current_office_name: r.current_office_name!,
-        current_status_label: r.current_status_label, current_purpose: r.current_purpose, current_since: r.current_since!,
-        route_step: r.route_step!, total_steps: r.total_steps! });
-    } },
-    amount,
-  ];
-  return <DataTable columns={columns} data={rows} emptyMessage="Your office has no open PRs." />;
-}
-
 export function FollowingTable({ rows }: { rows: FollowedActivityRow[] }) {
   const columns: ColumnDef<FollowedActivityRow>[] = [
     { accessorKey: "routing_slip_no", header: "Routing Slip", cell: ({ row }) => <RsLink id={row.original.pr_id!} rs={row.original.routing_slip_no!} /> },
-    { id: "what", header: "Activity", cell: ({ row }) => describeEvent({
-        ...(row.original as unknown as TimelineEvent), from_office_name: null, to_office_name: null, status_label: null,
-        override_reason: null, remark: null, to_route_step: null, route_purpose: null, payload: {},
-      }, 0) },
+    { id: "what", header: "Activity", cell: ({ row }) => describeEvent(
+        row.original as unknown as TimelineEvent, row.original.total_steps ?? 0) },
     { accessorKey: "actor_office_name", header: "Office" },
     { accessorKey: "created_at", header: "When", cell: ({ row }) => formatDateTime(row.original.created_at!) },
   ];
